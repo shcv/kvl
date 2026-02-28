@@ -1,0 +1,11 @@
+{
+  "/": [
+    "This is a comment at the start",
+    "Comment between keys",
+    "Another comment",
+    "Final comment"
+  ],
+  "name": "test",
+  "version": "1.0",
+  "active": "true"
+}

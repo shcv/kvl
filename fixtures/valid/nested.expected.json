@@ -1,0 +1,21 @@
+{
+  "/": [
+    "Nested KVL configuration",
+    "Demonstrates nested objects via indentation"
+  ],
+  "server": {
+    "host": "localhost",
+    "port": "8080",
+    "ssl": "true"
+  },
+  "database": {
+    "connection": {
+      "host": "db.example.com",
+      "port": "5432"
+    },
+    "pool": {
+      "min_size": "5",
+      "max_size": "20"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+# Zig
+zig-cache/
+zig-out/
+.zig-cache/
+
+# Build artifacts
+/target/
+/build/
+/dist/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test outputs
+test-results/
+benchmark-results/
+
+# Temporary files
+*.tmp
+*.log

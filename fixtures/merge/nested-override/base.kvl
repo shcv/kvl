@@ -1,0 +1,7 @@
+app =
+    server =
+        host = localhost
+        port = 8080
+    db =
+        host = db-local
+        name = mydb

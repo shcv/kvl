@@ -1,0 +1,581 @@
+#+TITLE: KVL Language Specification
+#+SUBTITLE: Complete Language Definition and Semantics
+
+* Introduction
+
+KVL (Key-Value Language) is a configuration format derived from CCL (Categorical Configuration Language) by Dmitrii Kovanikov (chshersh). This document defines the complete language specification including syntax, semantics, and mathematical properties.
+
+* Core Principles
+
+1. *Simplicity* - Minimal syntax with clear, unambiguous parsing rules
+2. *Composability* - Configurations can be merged with mathematical guarantees
+3. *List Support* - Repeated keys naturally create lists/arrays in the user API
+
+* Lexical Structure
+
+** Comments
+
+KVL has no special comment syntax. By convention, =/= is used as a comment key:
+
+#+begin_src kvl
+/= This is a comment
+name = value
+/= Another comment
+#+end_src
+
+This is ordinary KVL: =/= is the key, the text after === is the value. No special handling is needed in parsers. Multiple =/== lines merge categorically like any repeated key:
+
+#+begin_src kvl
+/= First comment
+/= Second comment
+#+end_src
+
+Parses as ={"/": ["First comment", "Second comment"]}=.
+
+*Rationale:* Treating comments as plain key-value pairs means:
+- Comments are preserved in the parsed structure automatically
+- Applications can filter by the =/= key when desired
+- No special-case code is needed in parsers
+
+KVL has no end-of-line comment syntax. Any text after a value is part of that value.
+
+** Headers
+
+Configuration headers specify processing options and begin with =#=:
+
+#+begin_src kvl
+#= kvl 1.0
+#= kvl 1.0 -
+#= kvl 1.0 -+*
+#: kvl 1.0 space-before=false
+#-> kvl 1.0 space-around=true
+#+end_src
+
+Header format: =#{separator} kvl {version} {list-markers} {options...}=
+
+- Separator: The character(s) following =#= become the key-value separator
+- Version: Currently =1.0=
+- List markers: Optional string of characters (=-=, =-+=, =-+*=) that enable list marker syntax
+- Options: Kebab-case configuration options (e.g., =space-before=false=, =compact=true=)
+
+*Implementation Note:* Header options use kebab-case for readability and language-agnostic consistency. Implementations should translate kebab-case option names to match host-language identifier constraints (e.g., =space-before= → =spaceBefore= in JavaScript, =space_before= in Python/Rust).
+
+*Common Header Options:*
+- =space-before=false= - No space before separator
+- =space-after=false= - No space after separator
+- =space-around=true= - Spaces both before and after separator
+- =compact=true= - Enable automatic list compaction in standard API
+
+** Separators
+
+KVL supports multiple key-value separators:
+
+- === (default) - =key = value=
+- =:= - =key: value=
+- =->= - =key -> value=
+- =:== - =key := value=
+- Custom separators allowed
+
+** Escape Sequences
+
+KVL uses backslash to escape the separator character, allowing it to appear literally in keys or values.
+
+*Core Principle:* Only the separator character needs escaping. Backslash before the separator (=\{sep}=) produces a literal separator character.
+
+#+begin_src kvl
+#= kvl 1.0
+url = https\://example.com    # Won't work - : is not the separator
+equation = x\=y+z             # Works - \= produces literal =
+path = C:\Users\Name          # Works - : doesn't need escaping with = separator
+
+#: kvl 1.0
+url: https\://example.com     # Works - \: produces literal :
+time: 12\:30                  # Works - \: produces literal :
+equation: x=y                 # Works - = doesn't need escaping with : separator
+#+end_src
+
+*Escape Rules:*
+
+1. =\{separator}= → ={separator}= (backslash + separator produces literal separator)
+2. Only the current separator (defined in header) needs escaping
+3. Characters that aren't the separator never need escaping
+4. Backslash before non-separator characters is preserved literally
+
+*Multiple Backslashes:*
+
+When backslashes appear before the separator, they are processed in pairs:
+
+#+begin_src kvl
+value = a\\=b      # Two backslashes: a\ followed by separator → "a\", key ends
+value = a\=b       # Result: "a=b" (escaped separator in value)
+value = a\\\=b     # Three backslashes: a\\ followed by escaped separator → "a\=b"
+#+end_src
+
+*Implementation Note:* Implementations should use a two-pass approach: first, find the unescaped separator to split key/value; second, unescape the separator in both key and value parts.
+
+** Whitespace and Indentation
+
+*Indentation Rules:*
+
+1. *Indentation determines nesting level* - Increased indentation creates nested structures
+2. *Spaces and tabs* - Both are allowed for indentation
+3. *Tab equivalence* - One tab character equals 4 spaces for indentation purposes
+4. *Strict mode* - A file must use EITHER tabs OR spaces consistently, not both (mixing is a parse error in strict mode)
+5. *Value whitespace* - Leading/trailing whitespace in values is preserved
+
+#+begin_src kvl
+/= Using spaces (recommended)
+server =
+    host = localhost    # 4 spaces = 1 level
+    config =
+        timeout = 30    # 8 spaces = 2 levels
+
+/= Using tabs (equivalent)
+server =
+{tab}host = localhost      # 1 tab = 1 level
+{tab}config =
+{tab}{tab}timeout = 30     # 2 tabs = 2 levels
+#+end_src
+
+*Indentation Best Practices:*
+
+- Use consistent indentation (all spaces or all tabs) within a file
+- Recommended: 2 or 4 spaces per level
+- **Strict mode enforcement**: Enable strict mode to reject files that mix tabs and spaces
+- Ensure child elements have greater indentation than their parent
+
+*Strict Mode Behavior:*
+
+Parsers should implement strict indentation checking where:
+- **Mode detection**: First indentation character determines the mode (tabs or spaces)
+- **Tab mode**: Only tabs count for indentation; spaces after tabs are value content
+- **Space mode**: Only spaces count for indentation
+- **Mixed mode error**: Using both tabs and spaces for indentation raises a parse error
+- **Header override**: Files can force mode with =indent=tabs= or =indent=spaces= option
+
+*Strict Mode Examples:*
+
+#+begin_src kvl
+#= kvl 1.0 indent=spaces
+server =
+    host = localhost    # Valid: spaces only
+{tab}port = 8080        # ERROR: tab in space mode
+#+end_src
+
+#+begin_src kvl
+#= kvl 1.0 indent=tabs
+server =
+{tab}host = localhost      # Valid: tabs only
+    port = 8080            # ERROR: spaces in tab mode
+#+end_src
+
+*Rationale:* Strict mode prevents ambiguous parsing and ensures structural clarity. Mixed indentation can lead to subtle bugs and inconsistent interpretation across different tools.
+
+* Syntax
+
+** Key-Value Pairs
+
+Basic assignment syntax:
+
+#+begin_src kvl
+key = value
+name = John Doe
+port = 8080
+active = true
+#+end_src
+
+** Nested Objects
+
+Nesting is indicated by indentation:
+
+#+begin_src kvl
+server = 
+    host = localhost
+    port = 8080
+    config = 
+        timeout = 30
+        retries = 3
+#+end_src
+
+** Repeated Keys (List Creation)
+
+Repeated keys create lists in the standard user-facing API:
+
+#+begin_src kvl
+tags = web
+tags = api
+tags = production
+
+/= Results in the user-facing API:
+/= tags = ["web", "api", "production"]
+#+end_src
+
+This creates a proper list/array that users expect and can work with naturally.
+
+*Implementation Detail*: Internally, KVL represents repeated keys as categorical structures (nested mappings like ={web: {}, api: {}, production: {}}=) to maintain mathematical properties for merging. However, the standard user-facing API (=loads()=, =Unmarshal()=, etc.) automatically compacts these into lists. Advanced users can access the raw categorical format through lower-level APIs (=parse()=, =ParseCategorical()=) if needed for special use cases.
+
+** List Markers (Syntactic Sugar)
+
+List markers provide improved readability for list structures and must be declared in the header:
+
+#+begin_src kvl
+#: kvl 1.0 -
+dependencies:
+  - react
+  - typescript
+  - webpack
+#+end_src
+
+*Key Properties:*
+1. List markers are *syntactic sugar* - exactly equivalent to empty keys (=: react= in this example)
+2. Must be declared in header (e.g., =-=, =-+=, or =-+*=)
+3. Must be first non-whitespace character on the line
+4. Must be followed by exactly one space or tab
+5. Create the same categorical structure as empty keys
+
+*Marker Recognition Rules:*
+
+#+begin_src kvl
+#= kvl 1.0 -
+tags =
+  - web         # Valid: marker + space + value
+  - api         # Creates: tags = { web = {}, api = {} }
+
+server =
+  endpoints =
+    - /users    # Valid: markers work at any nesting level
+    - /posts
+#+end_src
+
+*Invalid Usage:*
+
+#+begin_src kvl
+#: kvl 1.0 -
+-no-space           # Invalid: no space after marker
+server:
+  - key: value      # Invalid: separator on same line as marker
+#+end_src
+
+*Multiple Markers:*
+
+Declare multiple markers for different semantic meanings:
+
+#+begin_src kvl
+#: kvl 1.0 -+*
+tasks:
+  high-priority:
+    - Fix critical bug
+  medium-priority:
+    + Add feature
+  low-priority:
+    * Refactor code
+#+end_src
+
+** Empty Values
+
+Keys can have empty values, creating categorical structure:
+
+#+begin_src kvl
+feature-flags = 
+    = experimental-ui
+    = new-analytics
+    = beta-search
+
+/= Equivalent to:
+/= feature-flags = {
+/=     experimental-ui = {},
+/=     new-analytics = {},
+/=     beta-search = {}
+/= }
+#+end_src
+
+* Semantics
+
+** Value Types
+
+KVL is dynamically typed with automatic inference in the standard API:
+
+- *Strings* - Default type, no quotes required: =name = John Doe=
+- *Numbers* - Integers and floats: =port = 8080=, =rate = 1.5=
+- *Booleans* - Canonical literals: =true= and =false=
+- *Objects* - Nested key-value structures
+- *Categorical* - Repeated key structures
+
+*** Boolean Value Parsing (Application Layer)
+
+*Core Specification:* The KVL specification defines only two canonical boolean literals: =true= and =false= (lowercase).
+
+*Implementation Guidance:* Type inference and boolean parsing are application-layer concerns. Implementations MAY choose to accept additional boolean representations for user convenience. The Python reference implementation accepts (case-insensitive):
+
+- Truth values: =true=, =yes=, =on=, =1=
+- False values: =false=, =no=, =off=, =0=
+
+*Recommendation:* For maximum portability, KVL files should use only the canonical =true= and =false= literals. Implementations that accept extended boolean formats should document their specific behavior.
+
+#+begin_src kvl
+/= Canonical (portable across all implementations)
+debug = true
+production = false
+
+/= Extended formats (Python reference implementation)
+debug = yes      # Parsed as boolean true
+production = 0   # Parsed as boolean false
+#+end_src
+
+** Merge Operations
+
+KVL supports composable configuration merging with associative guarantees. All merges create categorical structures that preserve complete information.
+
+*Merge Rules:*
+
+1. *Simple values* - Create categorical structure: =port = 8080= + =port = 9000= → ={port: {8080: {}, 9000: {}}}=
+2. *Nested objects* - Recursive merge preserves non-conflicting keys
+3. *Categorical structures* - Union merge combines all unique keys
+
+*Rationale:* Categorical merge preserves all information from both configurations. Applications can then decide precedence (first-wins vs last-wins) using the standard API's compaction, which converts to arrays. This design enables more flexible configuration management.
+
+*Example with Compaction:*
+
+#+begin_src kvl
+/= Configuration A
+port = 8080
+host = localhost
+
+/= Configuration B
+port = 9000
+timeout = 30
+
+/= Low-level merge result (categorical):
+/= {
+/=   port: {8080: {}, 9000: {}},
+/=   host: {localhost: {}},
+/=   timeout: {30: {}}
+/= }
+
+/= Standard API after compaction:
+/= {
+/=   port: [8080, 9000],
+/=   host: "localhost",
+/=   timeout: 30
+/= }
+#+end_src
+
+For detailed merge semantics, examples, and proofs, see [[./mathematical-properties.org][Mathematical Properties Guide]].
+
+* Data Model
+
+** Internal Representation
+
+KVL data is represented as nested dictionaries:
+
+#+begin_src python
+{
+    "server": {
+        "host": "localhost",
+        "port": "8080"
+    },
+    "tags": {
+        "web": {},
+        "api": {},
+        "production": {}
+    }
+}
+#+end_src
+
+** List vs Categorical Distinction
+
+*User API*: KVL's standard API provides lists/arrays from repeated keys:
+
+#+begin_src kvl
+/= This creates a list in the user API:
+items = first
+items = second
+items = third
+
+/= User API result: ["first", "second", "third"]
+#+end_src
+
+*Internal Representation*: For mathematical soundness and merge operations, KVL internally uses categorical mappings (={first: {}, second: {}, third: {}}=). This distinction is transparent to users - the standard API handles the conversion automatically.
+
+* Mathematical Properties
+
+KVL configurations form a monoid under the merge operation, providing associative composition guarantees. Merge operations satisfy =(A + B) + C = A + (B + C)=, enabling reliable configuration layering and composition.
+
+For detailed mathematical properties, proofs, and theoretical foundations, see [[./mathematical-properties.org][Mathematical Properties Guide]].
+
+* Processing Requirements
+
+** Conforming Implementations
+
+A conforming KVL implementation must:
+
+1. Parse all syntax defined in this specification
+2. Preserve the categorical nature of repeated keys in the parsed representation
+3. Support all standard separators (=, :, ->, :=)
+4. Implement proper indentation-based nesting
+5. Treat lines beginning with =/== as conventional keys (preserve in parsed structure)
+6. Parse header options using kebab-case format
+7. Implement escape sequence handling for separators (backslash before separator produces literal separator)
+
+** Optional Features
+
+Implementations may optionally provide:
+
+1. *List compaction* from categorical structures (strongly recommended, should be enabled by default in standard API)
+2. *Schema validation systems* (see [[./schema-guide.org][Schema Guide]] for the recommended approach - Python and Zig provide reference implementations)
+3. *Additional separators* beyond the standard set (=, :, ->, :=)
+4. *Type inference* and automatic conversion (strings to numbers/booleans)
+5. *Merge operations* with associativity guarantees (see [[./mathematical-properties.org][Mathematical Properties]])
+6. *Serialization* from native data structures back to KVL format
+7. *Streaming/incremental parsing* for large files
+
+*Note on Schemas:* Schema validation is entirely optional. KVL is designed to work without schemas, with implementations free to provide schemas as an add-on feature. Implementations with full schema support (Python, Zig) can serve as references for other implementations.
+
+** Error Handling
+
+Implementations must detect and report:
+
+1. Syntax errors with line/column information
+2. Invalid indentation patterns
+3. Malformed key-value pairs (missing separator)
+4. Invalid header specifications
+
+** Two-Tier API Architecture
+
+KVL implementations should provide two levels of API to serve different use cases:
+
+*** Standard API (High-Level, Compacted)
+
+The standard API is the primary interface for most users. It provides:
+
+1. *List compaction* - Converts categorical structures to native arrays/lists
+2. *Type inference* - Automatically converts strings to numbers, booleans, etc.
+3. *Intuitive data structures* - Returns data in the format users expect
+
+*Naming conventions (follow established patterns):*
+
+| Language | Parse String | Parse File | Serialize String | Serialize File |
+|----------+--------------+------------+------------------+----------------|
+| Python | =loads(text)= | =load(file)= | =dumps(data)= | =dump(data, file)= |
+| Go | =Unmarshal(text)= | =UnmarshalFile(path)= | =Marshal(data)= | =MarshalFile(data, path)= |
+| JavaScript | =parse(text)= | =parseFile(path)= | =stringify(data)= | =stringifyFile(data, path)= |
+| Rust | =from_str(text)= | =from_reader(reader)= | =to_string(data)= | =to_writer(data, writer)= |
+
+*Example output (Python):*
+#+begin_src python
+kvl.loads("""
+tags = web
+tags = api
+tags = production
+""")
+# Returns: {'tags': ['web', 'api', 'production']}
+#+end_src
+
+*** Low-Level API (Categorical)
+
+The low-level API provides direct access to KVL's mathematical representation:
+
+1. *Categorical structures* - Repeated keys as nested mappings
+2. *No type inference* - Returns raw string values
+3. *Mathematical soundness* - Preserves algebraic properties for custom merge operations
+
+*Naming conventions:*
+
+| Language | Parse String | Parse File |
+|----------+--------------+------------|
+| Python | =parse(text)= | =parse_file(path)= |
+| Go | =ParseCategorical(text)= | =ParseCategoricalFile(path)= |
+| JavaScript | =parseCategorical(text)= | =parseCategoricalFile(path)= |
+| Rust | =parse_categorical(text)= | =parse_categorical_file(path)= |
+
+*Example output (Python):*
+#+begin_src python
+kvl.parse("""
+tags = web
+tags = api
+tags = production
+""")
+# Returns: {'tags': {'web': {}, 'api': {}, 'production': {}}}
+#+end_src
+
+*** When to Use Each API
+
+*Use Standard API (loads/Unmarshal) for:*
+- Application configuration loading
+- User-facing data deserialization
+- Most common use cases
+- Direct use of lists/arrays in code
+
+*Use Low-Level API (parse/ParseCategorical) for:*
+- Custom merge strategies
+- Schema-driven transformations
+- Direct access to mathematical structure
+- Advanced categorical operations
+- Building higher-level abstractions
+
+*** API Design Recommendations
+
+1. *Default to standard API* - Make the high-level, compacted API the primary interface
+2. *Document both tiers* - Clearly explain when to use each
+3. *Consistent naming* - Follow established patterns from JSON libraries in each language
+4. *Preserve categorical option* - Always provide access to the raw categorical representation
+
+** Header Option Translation
+
+Header options use kebab-case for language-agnostic consistency. Implementations should translate these to match host-language conventions:
+
+- *Python/Rust:* =space-before= → =space_before=
+- *JavaScript/TypeScript:* =space-before= → =spaceBefore=
+- *Go:* =space-before= → =SpaceBefore=
+- *Zig:* =space-before= → =space_before=
+
+This ensures options remain readable in KVL files while conforming to each language's identifier naming conventions.
+
+* Version History
+
+- *1.0* - Initial specification
+  - Basic key-value syntax
+  - Nested objects via indentation
+  - Multiple separator support
+  - Categorical structure for repeated keys
+
+* Formal Grammar
+
+#+begin_src bnf
+kvl-file      ::= header? statement*
+header        ::= '#' separator 'kvl' version list-markers? option*
+statement     ::= assignment | list-item | blank-line
+assignment    ::= key separator value?
+list-item     ::= INDENT list-marker SPACE value
+key           ::= key-char+ (excluding unescaped separator)
+key-char      ::= [^\n] | escaped-separator
+value         ::= simple-value | nested-object
+simple-value  ::= value-char*
+value-char    ::= [^\n] | escaped-separator
+nested-object ::= INDENT statement* DEDENT
+separator     ::= '=' | ':' | '->' | ':=' | custom-string
+escaped-sep   ::= '\' separator
+list-markers  ::= marker-char+
+list-marker   ::= marker-char   # When declared in header
+marker-char   ::= '-' | '+' | '*' | [!-~]  # Printable ASCII
+version       ::= [0-9]+ '.' [0-9]+
+option        ::= kebab-identifier '=' value | identifier
+kebab-id      ::= [a-z][a-z0-9-]*
+identifier    ::= [a-zA-Z_][a-zA-Z0-9_-]*
+blank-line    ::= [ \t]*
+INDENT        ::= increase in leading whitespace
+DEDENT        ::= decrease in leading whitespace
+SPACE         ::= ' ' | '\t'
+#+end_src
+
+*Grammar Notes:*
+
+1. *Keys* can contain any characters except the unescaped separator and newlines
+2. *Escaped separators* (=\{sep}=) are treated as literal characters in keys and values
+3. *List markers* must be declared in the header and followed by exactly one space/tab
+4. *Options* use kebab-case (e.g., =space-before=false=) for readability
+5. *Comments* (lines starting with =/==) are parsed as regular keys in the =/== namespace
+
+* Reference Implementation
+
+The Python implementation (py) serves as the reference implementation for this specification.

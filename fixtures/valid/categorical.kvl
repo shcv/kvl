@@ -1,0 +1,10 @@
+/= Categorical structures demonstration
+/= Repeated keys create list structure (compacted)
+
+tags = web
+tags = api
+tags = production
+
+permissions = read
+permissions = write
+permissions = admin

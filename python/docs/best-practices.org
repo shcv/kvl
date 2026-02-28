@@ -1,0 +1,530 @@
+#+TITLE: KVL Best Practices
+
+* Design Philosophy
+
+** Embrace Simplicity
+
+KVL's strength is its simplicity. Don't try to make it do things it wasn't designed for:
+
+#+BEGIN_SRC kvl
+#= Good: Simple, clear structure
+database =
+  host = localhost
+  port = 5432
+  name = myapp
+
+#= Bad: Trying to encode complex logic
+database =
+  if_production = host=prod.db
+  else = host=localhost
+#+END_SRC
+
+** Everything is a String (By Default)
+
+Follow CCL's philosophy - let the application layer handle type conversion:
+
+#+BEGIN_SRC kvl
+#= Good: Simple strings
+port = 8080
+debug = true
+timeout = 30.5
+
+#= The application decides how to interpret these
+#+END_SRC
+
+** Use Schemas for Type Safety
+
+When you need types, use schemas explicitly:
+
+#+BEGIN_SRC python
+# Good: Explicit schema for type conversion
+schema = Schema({
+    "port": int,
+    "debug": bool,
+    "timeout": float
+})
+
+config = schema.load("config.kvl")
+#+END_SRC
+
+* File Organization
+
+** Naming Conventions
+
+#+BEGIN_SRC bash
+project/
+  config.kvl              # Main configuration
+  config.kvl.schema       # Schema definition
+  
+  config/
+    base.kvl             # Base configuration
+    development.kvl      # Environment overrides
+    production.kvl       # Production settings
+    
+  schemas/
+    user.kvl.schema      # Domain schemas
+    api.kvl.schema
+#+END_SRC
+
+** Use Descriptive Keys
+
+#+BEGIN_SRC kvl
+#= Good: Clear, descriptive keys
+database_connection =
+  host = localhost
+  port = 5432
+  
+#= Bad: Abbreviated or unclear
+db_conn =
+  h = localhost
+  p = 5432
+#+END_SRC
+
+** Group Related Configuration
+
+#+BEGIN_SRC kvl
+#= Good: Logical grouping
+server =
+  host = 0.0.0.0
+  port = 8080
+  workers = 4
+  
+database =
+  host = localhost
+  port = 5432
+  name = myapp
+  
+#= Bad: Flat structure
+server_host = 0.0.0.0
+server_port = 8080
+database_host = localhost
+database_port = 5432
+#+END_SRC
+
+* Schema Design
+
+** Start Simple, Add Constraints Later
+
+#+BEGIN_SRC python
+# Phase 1: Basic types
+schema_v1 = Schema({
+    "host": str,
+    "port": int
+})
+
+# Phase 2: Add validation as needed
+schema_v2 = Schema({
+    "host": (str, lambda v: len(v) > 0),
+    "port": (int, lambda v: 1 <= v <= 65535)
+})
+#+END_SRC
+
+** Use Named Validators
+
+#+BEGIN_SRC python
+# Good: Named, reusable validators
+def port_range(port):
+    return 1 <= port <= 65535
+
+def non_empty(value):
+    return len(value.strip()) > 0
+
+schema = Schema({
+    "host": (str, non_empty),
+    "port": (int, port_range)
+})
+
+# Bad: Anonymous lambdas everywhere
+schema = Schema({
+    "host": (str, lambda v: len(v.strip()) > 0),
+    "port": (int, lambda v: 1 <= v <= 65535)
+})
+#+END_SRC
+
+** Document Schema Constraints
+
+#+BEGIN_SRC kvl
+#= kvl 1.0 schema
+
+#= Server configuration schema
+#= All fields are optional unless noted
+
+#= Server hostname (required)
+host = string
+
+#= Port number (1-65535)
+port = integer
+
+database =
+  #= Database host
+  host = string
+
+  #= Database port (1-65535)
+  port = integer
+
+  #= Database name (required)
+  name = string
+
+  #= Connection pool size (1-100)
+  pool_size = integer
+#+END_SRC
+
+* Working with Lists
+
+** Be Explicit About List Fields
+
+#+BEGIN_SRC kvl
+#= Good: Clear that these will be lists
+features = authentication
+features = authorization
+features = caching
+
+#= Use schema to make it explicit
+schema = Schema({"features": list})
+#+END_SRC
+
+** Consider Compact Mode
+
+#+BEGIN_SRC kvl
+#= kvl 1.0
+
+#= loads() automatically converts repeated keys to lists
+servers = web1
+servers = web2
+servers = web3
+
+#= Result with loads(): {"servers": ["web1", "web2", "web3"]}
+#= Result with parse(): {"servers": {"web1": {}, "web2": {}, "web3": {}}}
+#+END_SRC
+
+** Document List Behavior
+
+#+BEGIN_SRC python
+# config.kvl
+"""
+#= Allowed roles (can specify multiple)
+roles = admin
+roles = moderator
+
+#= Enabled features (can specify multiple)
+features = search
+features = export
+"""
+#+END_SRC
+
+* Error Handling
+
+** Provide Context in Errors
+
+#+BEGIN_SRC python
+# Good: Contextual error messages
+try:
+    config = kvl.load("config.kvl")
+except KvlParseError as e:
+    print(f"Failed to load configuration: {e}")
+    print(f"Check line {e.line} in config.kvl")
+    sys.exit(1)
+
+# Bad: Silent failures
+try:
+    config = kvl.load("config.kvl")
+except:
+    config = {}  # Dangerous default
+#+END_SRC
+
+** Validate Early
+
+#+BEGIN_SRC python
+# Good: Validate at startup
+def load_config():
+    try:
+        schema = Schema.from_file("config.kvl.schema")
+        config = schema.load("config.kvl")
+        validate_business_rules(config)
+        return config
+    except KvlError as e:
+        logger.error(f"Configuration error: {e}")
+        raise
+
+# Load once at startup
+CONFIG = load_config()
+#+END_SRC
+
+** Use Specific Exception Types
+
+#+BEGIN_SRC python
+# Good: Handle specific errors differently
+try:
+    data = schema.loads(user_input)
+except KvlParseError as e:
+    return "Invalid syntax in configuration"
+except KvlTypeError as e:
+    return f"Invalid type for field {e.path}"
+except KvlValidationError as e:
+    return f"Validation failed: {e}"
+#+END_SRC
+
+* Performance
+
+** Cache Parsed Configuration
+
+#+BEGIN_SRC python
+# Good: Parse once, use many times
+class ConfigManager:
+    def __init__(self):
+        self._config = None
+        self._schema = None
+    
+    @property
+    def config(self):
+        if self._config is None:
+            self._config = self.load_config()
+        return self._config
+    
+    def load_config(self):
+        if self._schema is None:
+            self._schema = Schema.from_file("config.kvl.schema")
+        return self._schema.load("config.kvl")
+
+# Singleton instance
+config_manager = ConfigManager()
+#+END_SRC
+
+** Avoid Repeated Transformations
+
+#+BEGIN_SRC python
+# Good: load() already returns compacted data
+data = kvl.load("data.kvl")
+# Use data throughout - it already has lists
+
+# If you need raw categorical structure:
+raw_data = kvl.parse(open("data.kvl").read())
+# Then compact once if needed
+list_data = compact(raw_data)
+#+END_SRC
+
+* Security
+
+** Never Store Secrets in KVL Files
+
+Well, unless you have to, or you encrypt the file.
+The main thing is that plaintext secrets are bad, for a variety of reasons - they get displayed on screen, checked into version control, etc.
+
+#+BEGIN_SRC kvl
+#= Bad: Secrets in config
+database =
+  password = mysecretpassword
+  api_key = sk-1234567890abcdef
+
+#= Good: Reference environment variables
+database =
+  password_env = DB_PASSWORD
+  api_key_env = API_KEY
+#+END_SRC
+
+#+BEGIN_SRC python
+# Load secrets from environment
+config = kvl.load("config.kvl")
+db_password = os.environ.get(config["database"]["password_env"])
+#+END_SRC
+
+** Validate File Permissions
+
+#+BEGIN_SRC python
+import os
+import stat
+
+def load_secure_config(path):
+    # Check file permissions
+    st = os.stat(path)
+    if st.st_mode & stat.S_IROTH:
+        raise SecurityError("Config file is world-readable")
+    
+    return kvl.load(path)
+#+END_SRC
+
+** Sanitize User Input
+
+#+BEGIN_SRC python
+# Good: Validate user-provided config
+def load_user_config(config_text):
+    # Size limit
+    if len(config_text) > 1_000_000:  # 1MB
+        raise ValueError("Configuration too large")
+    
+    # Parse with strict schema
+    strict_schema = Schema({
+        "allowed_key": str,
+        "another_key": int
+    })
+    
+    return strict_schema.loads(config_text)
+#+END_SRC
+
+* Testing
+
+** Use Test Fixtures
+
+#+BEGIN_SRC python
+# conftest.py
+import pytest
+import kvl
+from kvl import Schema
+
+@pytest.fixture
+def sample_config():
+    return """
+    name = test-app
+    debug = true
+    port = 8080
+    """
+
+@pytest.fixture
+def config_schema():
+    return Schema({
+        "name": str,
+        "debug": bool,
+        "port": int
+    })
+
+def test_config_loading(sample_config, config_schema):
+    config = config_schema.loads(sample_config)
+    assert config["name"] == "test-app"
+    assert config["debug"] is True
+    assert config["port"] == 8080
+#+END_SRC
+
+** Test Round-Trip Conversion
+
+#+BEGIN_SRC python
+def test_round_trip():
+    original = {"data": {"items": ["a", "b", "c"]}}
+    
+    # Convert to KVL format
+    kvl_data = expand(original)
+    kvl_text = kvl.dumps(kvl_data)
+    
+    # Parse back
+    parsed = kvl.loads(kvl_text)
+    compacted = compact(parsed)
+    
+    assert compacted == original
+#+END_SRC
+
+** Test Error Cases
+
+#+BEGIN_SRC python
+def test_invalid_syntax():
+    with pytest.raises(KvlParseError):
+        kvl.loads("invalid syntax without separator")
+
+def test_type_validation():
+    schema = Schema({"port": int})
+    
+    with pytest.raises(KvlTypeError):
+        schema.loads("port = not-a-number")
+#+END_SRC
+
+* Migration Strategy
+
+** From JSON
+
+#+BEGIN_SRC python
+# Gradual migration from JSON
+def load_config(path):
+    if path.endswith('.json'):
+        with open(path) as f:
+            data = json.load(f)
+            # Optionally validate with schema
+            return schema.deserialize(data)
+    else:
+        return schema.load(path)
+#+END_SRC
+
+** From YAML
+
+#+BEGIN_SRC python
+# Support both formats during transition
+def load_flexible_config(path):
+    if path.endswith('.yaml') or path.endswith('.yml'):
+        import yaml
+        with open(path) as f:
+            return yaml.safe_load(f)
+    elif path.endswith('.kvl'):
+        return compact(kvl.load(path))
+    else:
+        raise ValueError(f"Unknown config format: {path}")
+#+END_SRC
+
+* Common Pitfalls
+
+** Repeated Keys Create Lists (with loads())
+
+#+BEGIN_SRC python
+# loads() automatically converts repeated keys to lists
+data = kvl.loads("tags = a\ntags = b")
+for tag in data["tags"]:  # This works - it's already a list
+
+# If you need the raw categorical structure, use parse()
+raw_data = kvl.parse("tags = a\ntags = b")
+# raw_data["tags"] is {"a": {}, "b": {}}
+#+END_SRC
+
+** Remember Everything is a String
+
+#+BEGIN_SRC python
+# Wrong: Assumes type conversion
+data = kvl.loads("port = 8080")
+if data["port"] > 1024:  # Error! Comparing string to int
+
+# Right: Use schema or explicit conversion
+data = kvl.loads("port = 8080")
+if int(data["port"]) > 1024:
+    # ...
+#+END_SRC
+
+** Don't Mix Separators
+
+#+BEGIN_SRC kvl
+#= Wrong: Mixed separators without header
+name = John
+age: 30
+city -> London
+
+#= Right: Use header to specify separator, and use it consistently
+#: kvl 1.0
+name: John
+age: 30  
+city: London
+#+END_SRC
+
+* Debugging Tips
+
+** Use KVL CLI for Validation
+
+#+BEGIN_SRC bash
+# Validate syntax
+kvl validate config.kvl
+
+# Check formatting
+kvl format config.kvl
+
+# Test merging
+kvl merge base.kvl overrides.kvl
+#+END_SRC
+
+** Pretty Print for Debugging
+
+#+BEGIN_SRC python
+import json
+
+def debug_kvl(data):
+    """Pretty print KVL data for debugging."""
+    # Compact for readability
+    compacted = compact(data) if isinstance(data, dict) else data
+    print(json.dumps(compacted, indent=2))
+
+# Usage
+data = kvl.load("complex.kvl")
+debug_kvl(data)
+#+END_SRC

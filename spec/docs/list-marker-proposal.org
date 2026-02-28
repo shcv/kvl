@@ -1,0 +1,247 @@
+#+TITLE: KVL List Marker Proposal
+#+SUBTITLE: Syntactic Sugar for Improved List Readability
+
+* Motivation
+
+The current KVL syntax for creating lists uses repeated keys, which creates a categorical structure:
+
+#+begin_src kvl
+dependencies = react
+dependencies = typescript
+dependencies = webpack
+#+end_src
+
+Or with empty keys:
+
+#+begin_src kvl
+dependencies =
+  = react
+  = typescript
+  = webpack
+#+end_src
+
+This works well but has readability issues, especially when the separator is not `=`:
+
+#+begin_src kvl
+#: kvl 1.0
+dependencies:
+  : react      # Colon followed by colon looks awkward
+  : typescript
+  : webpack
+#+end_src
+
+* Design
+
+** Header-Based List Marker Declaration
+
+List markers are declared in the KVL header after the version:
+
+#+begin_src
+#<separator> kvl <version> [<list-markers>]
+#+end_src
+
+Examples:
+#+begin_src kvl
+#: kvl 1.0 -        # Enable - as a list marker
+#: kvl 1.0 -+*      # Enable -, +, and * as list markers
+#= kvl 1.0 -        # Works with any separator
+#+end_src
+
+** Key Principles
+
+1. *Syntactic Sugar Only* - List markers are exactly equivalent to empty keys
+2. *Explicit Opt-In* - No list markers without header declaration
+3. *Backwards Compatible* - Existing files work unchanged
+4. *Minimal Complexity* - Same parsing rules as empty keys
+
+* Syntax Rules
+
+** List Marker Requirements
+
+1. Must be one of the characters declared in the header
+2. Must be the first non-whitespace character on the line
+3. Must be followed by exactly one space
+4. Cannot have a separator on the same line
+5. Must be under an indented key (not at top level)
+
+** Valid Examples
+
+#+begin_src kvl
+#: kvl 1.0 -
+server:
+  name: api-gateway
+  endpoints:
+    - /api/users     # Valid: marker, space, value
+    - /api/posts
+    - /api/comments
+#+end_src
+
+** Invalid Examples
+
+#+begin_src kvl
+#: kvl 1.0 -
+- top-level          # Invalid: can't use at top level
+server:
+  -no-space          # Invalid: no space after marker
+  - key: value       # Invalid: separator on same line
+#+end_src
+
+* Semantics
+
+** Equivalence to Empty Keys
+
+List markers are parsed exactly as empty keys:
+
+#+begin_src kvl
+#: kvl 1.0 -
+items:
+  - foo
+  - bar
+
+# Is exactly equivalent to:
+items:
+  : foo
+  : bar
+
+# Which creates the structure:
+items = {
+  foo: {},
+  bar: {}
+}
+#+end_src
+
+** Merge Behavior
+
+Since list markers create the same categorical structure, merge behavior is unchanged:
+
+#+begin_src kvl
+# File A
+#: kvl 1.0 -
+tags:
+  - web
+  - api
+
+# File B  
+#: kvl 1.0 -
+tags:
+  - production
+  - monitoring
+
+# Merged result (associative merge of categorical structure)
+tags = {
+  web: {},
+  api: {},
+  production: {},
+  monitoring: {}
+}
+#+end_src
+
+* Examples
+
+** Basic Lists
+
+#+begin_src kvl
+#: kvl 1.0 -
+project:
+  name: my-app
+  dependencies:
+    - react
+    - typescript
+    - webpack
+  scripts:
+    - build
+    - test
+    - deploy
+#+end_src
+
+** Multiple Markers
+
+#+begin_src kvl
+#: kvl 1.0 -+*
+tasks:
+  high-priority:
+    - Fix critical bug
+    - Deploy hotfix
+  medium-priority:
+    + Add new feature
+    + Update documentation
+  low-priority:
+    * Refactor old code
+    * Update dependencies
+#+end_src
+
+** Nested Structures
+
+#+begin_src kvl
+#= kvl 1.0 -
+packages =
+  - name = react
+    version = 18.0.0
+    peer = true
+  - name = typescript
+    version = 5.0.0
+    dev = true
+#+end_src
+
+** Different Separators
+
+#+begin_src kvl
+#: kvl 1.0 -
+config:
+  features:
+    - authentication
+    - api-gateway
+
+#-> kvl 1.0 +
+config ->
+  features ->
+    + authentication
+    + api-gateway
+#+end_src
+
+* Implementation Notes
+
+** Parser Changes
+
+1. *parse_header()* - Extract list markers from end of header line
+2. *KvlConfig* - Add `list_markers: str` field
+3. *parse_line()* - Check if line starts with `whitespace + marker + space`
+4. *Transform* - If marker found, treat as `separator + space + rest_of_line`
+
+** Serializer Changes
+
+1. Detect categorical structures that could use list markers
+2. When serializing, prefer list markers for empty-key structures if enabled
+3. Add configuration option to control marker usage
+
+** Minimal Example
+
+#+begin_src python
+def parse_line(line, config):
+    stripped = line.lstrip()
+    if config.list_markers and stripped and stripped[0] in config.list_markers:
+        if len(stripped) > 1 and stripped[1] == ' ':
+            # Transform "- value" to ": value" (or current separator)
+            return parse_line(f"{config.separator} {stripped[2:]}", config)
+    # ... rest of normal parsing
+#+end_src
+
+* Open Questions
+
+1. *Serialization Preference* - When outputting, how to decide between repeated keys vs list markers?
+2. *Mixed Usage* - Should we allow mixing markers in the same list?
+3. *Schema Integration* - How do schemas indicate preference for list markers?
+4. *Error Messages* - How to report errors with list markers clearly?
+
+* Migration Path
+
+1. *Phase 1*: Implement parsing support (reading files with markers)
+2. *Phase 2*: Add serialization support (writing files with markers)
+3. *Phase 3*: Update tooling (kvq, schema validation)
+4. *Phase 4*: Update documentation and examples
+
+* Conclusion
+
+List markers provide a clean solution to the readability problem while maintaining KVL's simplicity and mathematical properties. By making them syntactic sugar for empty keys, we preserve all existing semantics while improving the user experience.
+
+The header-based declaration ensures backwards compatibility and makes the feature explicitly opt-in, following KVL's principle of no surprises.

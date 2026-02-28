@@ -1,0 +1,25 @@
+#: kvl 1.0 -+*
+/= This demonstrates multiple list marker functionality
+
+project: KVL Implementation
+version: 1.0
+
+priorities:
+- High priority items
+- Medium priority items  
+- Low priority items
+
+additions:
++ New feature: list markers
++ New feature: error reporting
++ New feature: expand function
+
+notes:
+* Remember to update docs
+* Test on all platforms
+* Coordinate with team
+
+config:
+    separator: colon
+    space_before: false
+    space_after: true

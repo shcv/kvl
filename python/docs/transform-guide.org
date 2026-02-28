@@ -1,0 +1,598 @@
+#+TITLE: KVL Transform Guide
+
+* Introduction
+
+KVL follows CCL's mathematical model where repeated keys create nested dictionaries rather than lists. While this provides mathematical elegance and consistency, it can be inconvenient for practical use. KVL's transform utilities provide bidirectional conversions between the pure CCL format and more convenient Python structures.
+
+* Understanding the Problem
+
+In CCL/KVL, repeated keys create nested structures:
+
+#+BEGIN_SRC python
+# Using parse() for raw categorical structure:
+data = kvl.parse("""
+ports = 8080
+ports = 8081
+ports = 8082
+""")
+
+# Produces this structure:
+print(data)
+# {'ports': {'8080': {}, '8081': {}, '8082': {}}}
+
+# But loads() automatically compacts:
+data = kvl.loads("""
+ports = 8080
+ports = 8081
+ports = 8082
+""")
+print(data)
+# {'ports': ['8080', '8081', '8082']}
+#+END_SRC
+
+This is mathematically consistent but can be awkward to work with.
+
+* The Transform Functions
+
+KVL provides two complementary functions:
+
+- `compact()` - Converts nested dicts to lists where appropriate
+- `expand()` - Converts lists back to nested dicts for serialization
+
+Together they guarantee *semantic* round-tripping: parsing → compacting → expanding → serializing → parsing again yields the same user-facing data structures. The exact textual form may change (for example, duplicate list entries merge when converted back to categorical form), so byte-for-byte equality is not preserved.
+
+* Using compact()
+
+Note: The `loads()` and `load()` functions automatically apply compacting.
+You only need to use `compact()` directly when working with raw data from `parse()`.
+
+** Basic Compacting
+
+#+BEGIN_SRC python
+import kvl
+from kvl import compact
+
+# Parse data to get raw categorical format
+data = kvl.parse("""
+name = MyApp
+
+servers = web1
+servers = web2
+servers = web3
+
+features = auth
+features = cache
+features = api
+""")
+
+# At this point, data contains nested dicts:
+# {'name': 'MyApp',
+#  'servers': {'web1': {}, 'web2': {}, 'web3': {}},
+#  'features': {'auth': {}, 'cache': {}, 'api': {}}}
+
+# Apply compact to convert to lists
+compacted = compact(data)
+
+print(compacted)
+# {
+#   'name': 'MyApp',
+#   'servers': ['web1', 'web2', 'web3'],
+#   'features': ['auth', 'cache', 'api']
+# }
+#+END_SRC
+
+** Compacting Rules
+
+The `compact()` function applies two transformations:
+
+1. *Empty-value dict flattening*: `{'a': {}, 'b': {}, 'c': {}}` → `['a', 'b', 'c']`
+2. *Singleton empty key lifting*: `{'': 'content'}` → `'content'`
+
+#+BEGIN_SRC python
+# Rule 1: Dict with all empty values becomes list
+data = {'tags': {'red': {}, 'green': {}, 'blue': {}}}
+compacted = compact(data)
+print(compacted)  # {'tags': ['red', 'green', 'blue']}
+
+# Rule 2: Dict with single empty key is lifted
+data = {'wrapper': {'': 'unwrapped content'}}
+compacted = compact(data)
+print(compacted)  # {'wrapper': 'unwrapped content'}
+#+END_SRC
+
+** Round-Trip Nuances
+
+Because the underlying categorical model behaves like a set union, repeated keys collapse to a single entry during compaction. For example:
+
+#+BEGIN_SRC python
+original = kvl.loads("""
+tags = web
+tags = api
+tags = web   # <- duplicate
+""")
+print(original["tags"])  # ['web', 'api']
+
+re_serialized = kvl.dumps(original)
+round_tripped = kvl.loads(re_serialized)
+assert round_tripped == original
+#+END_SRC
+
+The regenerated text may differ from the source, but parsing it again yields the same user-facing data. When precise provenance of duplicates matters, operate on the raw categorical structure returned by `parse()` or `keyvals()`.
+
+** Nested Compacting
+
+Compacting works recursively through nested structures:
+
+#+BEGIN_SRC python
+data = kvl.loads("""
+app =
+  name = MyService
+  
+  environments = dev
+  environments = staging
+  environments = prod
+  
+  features =
+    auth = enabled
+    cache = redis
+    
+    modules = user
+    modules = admin
+    modules = api
+""")
+
+compacted = compact(data)
+print(compacted['app']['environments'])
+# ['dev', 'staging', 'prod']
+
+print(compacted['app']['features']['modules'])
+# ['user', 'admin', 'api']
+#+END_SRC
+
+** Mixed Structures
+
+Compacting only affects structures that match the patterns:
+
+#+BEGIN_SRC python
+data = kvl.loads("""
+# This will compact (all empty values)
+tags = web
+tags = api
+
+# This won't compact (has non-empty values)
+servers =
+  web1 = 
+    ip = 10.0.0.1
+  web2 =
+    ip = 10.0.0.2
+""")
+
+compacted = compact(data)
+print(compacted['tags'])     # ['web', 'api'] - compacted
+print(compacted['servers'])  # Still a dict with nested structure
+#+END_SRC
+
+* Using expand()
+
+** Basic Expansion
+
+The `expand()` function reverses compacting for serialization:
+
+#+BEGIN_SRC python
+from kvl import expand
+
+# Python data with lists
+data = {
+    'name': 'MyApp',
+    'ports': [8080, 8081, 8082],
+    'features': ['auth', 'cache', 'api']
+}
+
+# Expand lists back to CCL format
+expanded = expand(data)
+
+print(expanded)
+# {
+#   'name': 'MyApp',
+#   'ports': {'8080': {}, '8081': {}, '8082': {}},
+#   'features': {'auth': {}, 'cache': {}, 'api': {}}
+# }
+
+# Now it can be serialized to valid KVL
+print(kvl.dumps(expanded))
+#+END_SRC
+
+** Round-Trip Conversion
+
+Compact and expand are inverses:
+
+#+BEGIN_SRC python
+# Start with KVL
+original_kvl = """
+servers = web1
+servers = web2
+servers = web3
+"""
+
+# Parse to CCL format
+data = kvl.loads(original_kvl)
+print(data)  # {'servers': {'web1': {}, 'web2': {}, 'web3': {}}}
+
+# Compact for convenience
+compacted = compact(data)
+print(compacted)  # {'servers': ['web1', 'web2', 'web3']}
+
+# Expand back for serialization
+expanded = expand(compacted)
+print(expanded)  # {'servers': {'web1': {}, 'web2': {}, 'web3': {}}}
+
+# Verify round-trip
+assert expanded == data
+#+END_SRC
+
+* Compact Mode Configuration
+
+** File-Level Compact Mode
+
+Enable automatic compacting with headers:
+
+#+BEGIN_SRC kvl
+#= kvl 1.0 compact
+
+tags = web
+tags = api
+tags = production
+
+# Automatically compacted when loaded
+#+END_SRC
+
+#+BEGIN_SRC python
+# Header triggers automatic compacting
+data = kvl.load("config.kvl")
+print(data['tags'])  # ['web', 'api', 'production']
+#+END_SRC
+
+** Programmatic Compact Mode
+
+#+BEGIN_SRC python
+from kvl import KvlConfig
+
+# Configure with compact mode
+config = KvlConfig(compact=True)
+
+data = kvl.loads("""
+items = first
+items = second
+items = third
+""", config=config)
+
+print(data['items'])  # ['first', 'second', 'third']
+#+END_SRC
+
+* Integration with Schemas
+
+** Schema-Driven Compacting
+
+Schemas can automatically compact list fields:
+
+#+BEGIN_SRC python
+from kvl import Schema
+
+schema = Schema({
+    'name': str,
+    'ports': list,      # Auto-compacts repeated keys
+    'features': list,   # Auto-compacts repeated keys
+    'debug': bool
+})
+
+data = schema.loads("""
+name = MyApp
+debug = true
+
+ports = 8080
+ports = 8081
+
+features = auth
+features = logging
+""")
+
+print(data['ports'])     # [8080, 8081] - auto-compacted
+print(data['features'])  # ['auth', 'logging'] - auto-compacted
+#+END_SRC
+
+** Schema Compact Mode
+
+Enable compact mode for entire schema:
+
+#+BEGIN_SRC python
+# Compact mode at schema level
+schema = Schema({
+    'name': str,
+    'version': str,
+    'modules': dict  # Even dicts can contain compacted data
+}, compact=True)
+
+data = schema.loads("""
+name = MyApp
+version = 1.0
+
+modules =
+  core =
+    files = main.py
+    files = utils.py
+    files = config.py
+""")
+
+# Nested repeated keys are also compacted
+print(data['modules']['core']['files'])
+# ['main.py', 'utils.py', 'config.py']
+#+END_SRC
+
+* Advanced Patterns
+
+** Selective Compacting
+
+Sometimes you want to compact only specific fields:
+
+#+BEGIN_SRC python
+def selective_compact(data, compact_keys):
+    """Compact only specified keys."""
+    result = data.copy()
+    for key in compact_keys:
+        if key in result and isinstance(result[key], dict):
+            # Check if this looks like a list structure
+            if all(isinstance(v, dict) and not v 
+                   for v in result[key].values()):
+                result[key] = list(result[key].keys())
+    return result
+
+# Usage
+data = kvl.loads("""
+name = MyApp
+
+# Want this as a list
+tags = web
+tags = api
+
+# Keep this as a dict
+servers =
+  primary = web1
+  secondary = web2
+""")
+
+compacted = selective_compact(data, ['tags'])
+print(compacted['tags'])     # ['web', 'api']
+print(compacted['servers'])  # Still a dict
+#+END_SRC
+
+** Working with Mixed Values
+
+Handle cases where some repeated keys have values:
+
+#+BEGIN_SRC python
+data = kvl.loads("""
+# Pure list-like structure
+tags = web
+tags = api
+
+# Mixed structure (some have values)
+servers =
+  web1 = active
+  web2 = standby
+  web3 =
+""")
+
+# compact() won't touch mixed structures
+compacted = compact(data)
+print(compacted['tags'])     # ['web', 'api']
+print(compacted['servers'])  # Unchanged dict
+
+# Custom handling for mixed structures
+def extract_keys(d):
+    """Extract just the keys as a list."""
+    if isinstance(d, dict):
+        return list(d.keys())
+    return d
+
+server_list = extract_keys(data['servers'])
+print(server_list)  # ['web1', 'web2', 'web3']
+#+END_SRC
+
+** Section Headers
+
+Section headers are preserved during compacting:
+
+#+BEGIN_SRC python
+data = kvl.loads("""
+== Development ==
+servers = dev1
+servers = dev2
+
+== Production ==  
+servers = prod1
+servers = prod2
+servers = prod3
+""")
+
+# Section headers prevent compacting
+print(data)
+# Headers create structure, not lists
+#+END_SRC
+
+* Performance Considerations
+
+** Large Datasets
+
+Transform functions are recursive and can be slow on deeply nested data:
+
+#+BEGIN_SRC python
+import time
+
+# Generate large nested structure
+large_data = {}
+for i in range(1000):
+    large_data[f'item_{i}'] = {str(j): {} for j in range(100)}
+
+# Time the compacting
+start = time.time()
+compacted = compact(large_data)
+end = time.time()
+
+print(f"Compacted {len(large_data)} items in {end-start:.3f}s")
+#+END_SRC
+
+** Optimization Tips
+
+1. *Use schemas when possible* - They compact during parsing
+2. *Compact once* - Don't repeatedly compact the same data
+3. *Consider streaming* - For very large files, process in chunks
+
+* Common Use Cases
+
+** Configuration Files
+
+#+BEGIN_SRC python
+# Load config with auto-compacting
+config = kvl.load("app.kvl")
+config = compact(config)
+
+# Work with convenient list format
+for server in config['servers']:
+    connect_to(server)
+
+# Save back to KVL
+expanded = expand(config)
+kvl.dump(expanded, "app.kvl")
+#+END_SRC
+
+** API Responses
+
+#+BEGIN_SRC python
+# Convert KVL to JSON-friendly format
+def kvl_to_json(kvl_file):
+    data = kvl.load(kvl_file)
+    compacted = compact(data)
+    return json.dumps(compacted)
+
+# Convert JSON back to KVL
+def json_to_kvl(json_str):
+    data = json.loads(json_str)
+    expanded = expand(data)
+    return kvl.dumps(expanded)
+#+END_SRC
+
+** Data Processing
+
+#+BEGIN_SRC python
+# Process compacted data
+data = kvl.load("data.kvl")
+data = compact(data)
+
+# Natural list operations
+data['items'] = [x.upper() for x in data['items']]
+data['numbers'] = [int(x) * 2 for x in data['numbers']]
+
+# Save results
+kvl.dump(expand(data), "processed.kvl")
+#+END_SRC
+
+* Best Practices
+
+** 1. Be Explicit
+
+Make it clear when you're working with compacted vs expanded data:
+
+#+BEGIN_SRC python
+# Good: Clear naming
+raw_data = kvl.load("config.kvl")
+list_data = compact(raw_data)        # Now contains lists
+kvl_data = expand(list_data)         # Ready for serialization
+
+# Bad: Ambiguous
+data = kvl.load("config.kvl")
+data = compact(data)  # Mutating can be confusing
+#+END_SRC
+
+** 2. Use Type Hints
+
+#+BEGIN_SRC python
+from typing import Dict, List, Union
+
+KvlData = Dict[str, Union[str, 'KvlData']]
+CompactData = Dict[str, Union[str, List[str], 'CompactData']]
+
+def process_config(data: KvlData) -> CompactData:
+    return compact(data)
+#+END_SRC
+
+** 3. Document Transform Usage
+
+#+BEGIN_SRC python
+def load_config(path: str) -> dict:
+    """
+    Load configuration from KVL file.
+    
+    Returns compacted data where repeated keys become lists.
+    Example: tags = web, tags = api → tags = ['web', 'api']
+    """
+    data = kvl.load(path)
+    return compact(data)
+#+END_SRC
+
+** 4. Test Round-Trips
+
+Always verify that your transforms are reversible:
+
+#+BEGIN_SRC python
+import pytest
+
+def test_transform_round_trip():
+    original = {'tags': {'web': {}, 'api': {}, 'v2': {}}}
+    compacted = compact(original)
+    expanded = expand(compacted)
+    assert expanded == original
+#+END_SRC
+
+* Troubleshooting
+
+** Unexpected Non-Compacting
+
+If data isn't compacting as expected:
+
+#+BEGIN_SRC python
+# Debug why compacting didn't work
+data = {'items': {'a': {}, 'b': 'value', 'c': {}}}
+
+# Check if all values are empty dicts
+for key, value in data['items'].items():
+    print(f"{key}: {value} (empty: {value == {}})")
+    
+# Output shows 'b' has a value, preventing compacting
+#+END_SRC
+
+** Type Errors After Compacting
+
+#+BEGIN_SRC python
+# Original code expecting dict
+# for key in data['items']:  # KeyError if compacted!
+
+# Safe approach
+items = data.get('items', {})
+if isinstance(items, list):
+    for item in items:
+        process(item)
+else:
+    for key in items:
+        process(key)
+#+END_SRC
+
+** Schema Integration Issues
+
+#+BEGIN_SRC python
+# If schema and compact conflict
+schema = Schema({'tags': dict})  # Expects dict
+data = compact(raw_data)         # Creates list
+
+# Solution: Let schema handle compacting
+schema = Schema({'tags': list})  # Schema knows to compact
+#+END_SRC

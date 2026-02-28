@@ -1,0 +1,101 @@
+/= Complex KVL Example
+/= Nested objects, mixed data types, and complex structures
+
+server =
+  host = localhost
+  port = 8080
+  ssl = true
+  
+  database =
+    driver = postgresql
+    host = db.example.com
+    port = 5432
+    
+    credentials =
+      username = admin
+      password = secret123
+      ssl_mode = require
+    
+    connection_pool =
+      min_connections = 5
+      max_connections = 20
+      timeout = 30.0
+
+/= Multiple middleware entries
+middleware =
+  name = cors
+  enabled = true
+  origins =
+    = http://localhost:3000
+    = https://app.example.com
+
+middleware =
+  name = auth
+  enabled = true
+  providers =
+    = oauth2
+    = jwt
+  
+  settings =
+    jwt_secret = my-secret-key
+    token_expiry = 3600
+
+/= User records
+user =
+  id = 1
+  name = Alice Johnson
+  email = alice@example.com
+  roles =
+    = admin
+    = user
+  
+  metadata =
+    last_login = 2023-12-01T10:30:00Z
+    
+    preferences =
+      theme = dark
+      notifications = true
+      language = en
+
+user =
+  id = 2
+  name = Bob Smith
+  email = bob@example.com
+  roles =
+    = user
+  
+  metadata =
+    last_login = 2023-12-02T14:15:00Z
+    
+    preferences =
+      theme = light
+      notifications = false
+      language = es
+
+/= API configuration sections
+=== Section: API v1 ===
+base_url = /api/v1
+
+routes =
+  users = /users
+  posts = /posts
+  auth = /auth
+
+rate_limits =
+  default = 100
+  authenticated = 1000
+  premium = 10000
+
+=== Section: API v2 ===
+base_url = /api/v2
+
+routes =
+  users = /users
+  posts = /posts
+  auth = /auth
+  files = /files
+
+rate_limits =
+  default = 200
+  authenticated = 2000
+  premium = 20000

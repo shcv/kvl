@@ -1,0 +1,82 @@
+#= kvl 1.0 schema open optional
+
+/= Flexible schema demonstrating mixed scoping and field inheritance
+/= Shows how global defaults can be overridden by context-specific specs
+
+/= Global field specifications (apply anywhere unless overridden)
+port = int
+host = string
+timeout = int
+enabled = bool
+name = string
+
+/= Application server context - specific port constraints
+server = 
+    port = 
+        type = int
+        min = 8000
+        max = 9000
+
+    ssl = 
+        enabled = bool
+        cert_path = string
+        key_path = string
+
+    workers = 
+        type = int
+        min = 1
+        max = 16
+
+/= Database context - different port constraints  
+database = 
+    port = 
+        type = int
+        enum = 3306,5432,27017,6379
+
+    connection = 
+        timeout = 
+            type = int
+            min = 1
+            max = 60
+
+        max_retries = 
+            type = int
+            min = 0
+            max = 10
+
+/= Monitoring/metrics context
+metrics = 
+    enabled = 
+        type = bool
+        required = true
+
+    port = 
+        type = int
+        min = 9000
+        max = 9999
+
+    endpoints = 
+        type = list
+        min-items = 1
+
+/= Load balancer context
+loadbalancer = 
+    enabled = bool
+
+    backends = 
+        type = list
+        min-items = 1
+
+    health_check = 
+        enabled = bool
+        timeout = 
+            type = int
+            min = 1
+            max = 30
+
+/= This demonstrates the algorithm:
+/= 1. server.port matches server.port spec (8000-9000)
+/= 2. database.port matches database.port spec (enum values)  
+/= 3. metrics.port matches metrics.port spec (9000-9999)
+/= 4. server.timeout has no server.timeout spec → matches global timeout = int
+/= 5. Unknown fields like "custom_field" pass through (open schema)

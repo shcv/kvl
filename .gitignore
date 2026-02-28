@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.pytest_cache/
+
+# JavaScript
+node_modules/
+coverage/
+
+# Go
+go/kvl
+
+# Zig
+zig/zig-cache/
+zig/zig-out/
+zig/.zig-cache/
+
+# Editors
+*.swp
+*~
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Claude Code
+.claude/
+
+# External references (separate repos)
+refs/

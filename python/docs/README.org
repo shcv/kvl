@@ -1,0 +1,32 @@
+#+TITLE: KVL Documentation
+
+* Documentation Index
+
+This directory contains comprehensive documentation for the Key-Value Language (KVL) Python implementation.
+
+** Core Documentation
+
+- [[file:foundations.org][Foundations]] - Mathematical foundation, relationship to CCL, and key differences
+- [[file:getting-started.org][Getting Started]] - Quick introduction and basic usage
+- [[file:language-spec.org][Language Specification]] - Complete KVL syntax and semantics reference
+- [[file:schema-guide.org][Schema Guide]] - Comprehensive schema system documentation  
+- [[file:transform-guide.org][Transform Guide]] - Detailed compacting and transform utilities
+- [[file:api-reference.org][API Reference]] - Complete Python API documentation
+- [[file:cookbook.org][Cookbook]] - Practical recipes and patterns
+- [[file:best-practices.org][Best Practices]] - Recommended patterns for KVL usage
+
+** Quick Links
+
+- [[../README.org][Main README]] - Getting started and basic usage
+- [[../examples/][Examples Directory]] - Practical examples and demos
+
+** Contributing
+
+Documentation contributions are welcome! Please ensure:
+
+- Use Org-mode format (~.org~ files) for consistency
+- Include practical examples where applicable  
+- Maintain clear, concise explanations
+- Cross-reference related documentation
+
+For technical API documentation, see the docstrings in the source code which are the authoritative reference.

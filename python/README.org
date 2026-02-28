@@ -1,0 +1,257 @@
+#+TITLE: kvl (Python): Key-Value Language for Python
+
+A Python implementation of Key-Value Language (KVL), a minimalist configuration format based on mathematical principles of composability.
+
+KVL is inspired by the Categorical Configuration Language (CCL) by Dmitrii Kovanikov.
+See: [[https://chshersh.com/blog/2025-01-06-the-most-elegant-configuration-language.html][The Most Elegant Configuration Language]]
+
+For the complete language specification, see the [[https://github.com/shcv/kvl/tree/main/spec][KVL specification]].
+
+* Features
+
+- *Simple*: Minimal syntax with just key-value pairs
+- *Composable*: Mathematically sound configuration merging
+- *Flexible*: Configurable separators (=, :, ->) with auto-detection
+- *Pythonic*: Optional type inference and list/dict transformations
+- *Validated*: Schema system with type checking and constraints
+- *Complete*: CLI tools for validation, formatting, and conversion
+
+* Installation
+
+#+BEGIN_SRC bash
+# Install from PyPI
+pip install kvl
+
+# Or install from source
+git clone https://github.com/shcv/kvl
+cd kvl/py
+pip install -e .
+#+END_SRC
+
+* Quick Start
+
+#+BEGIN_SRC python
+import kvl
+
+# Parse KVL
+config = kvl.loads("""
+server =
+  host = localhost
+  port = 8080
+  debug = true
+database =
+  url = postgresql://localhost/myapp
+  connections = 10
+""")
+
+print(config["server"]["host"])  # "localhost"
+print(config["server"]["port"])  # "8080" (string by default)
+
+# Save and load files
+kvl.dump(config, "config.kvl")
+config = kvl.load("config.kvl")
+#+END_SRC
+
+* Core Concepts
+
+** Everything is a Key-Value Pair
+
+#+BEGIN_SRC kvl
+/= Simple values
+name = MyApp
+version = 1.0.0
+
+/= Nested structures (via indentation)
+server =
+  host = localhost
+  port = 8080
+
+/= Lists (repeated keys)
+tags = web
+tags = production
+tags = stable
+
+/= Comments
+/= This is a comment
+#+END_SRC
+
+** Mathematical Composition
+
+KVL configurations can be merged associatively:
+
+#+BEGIN_SRC python
+base = kvl.load("base.kvl")
+dev = kvl.load("dev.kvl")
+local = kvl.load("local.kvl")
+
+# These are equivalent (associative property)
+config1 = kvl.merge(kvl.merge(base, dev), local)
+config2 = kvl.merge(base, kvl.merge(dev, local))
+#+END_SRC
+
+* Type System and Schemas
+
+By default, all values are strings (like CCL). For type safety, use schemas:
+
+#+BEGIN_SRC python
+from kvl import Schema
+
+# Define schema with types and constraints
+schema = Schema({
+    "host": str,
+    "port": (int, lambda v: 1 <= v <= 65535),
+    "debug": bool,
+    "tags": list,  # Automatically compacts repeated keys
+})
+
+# Load with type conversion
+config = schema.loads("""
+host = localhost
+port = 8080
+debug = true
+tags = web
+tags = api
+""")
+
+print(config["port"])   # 8080 (integer)
+print(config["debug"])  # True (boolean)
+print(config["tags"])   # ["web", "api"] (list)
+#+END_SRC
+
+* API Layers
+
+kvl (Python) provides two API levels for different use cases:
+
+** High-Level API (Compacted)
+
+The standard API automatically compacts categorical structures into lists:
+
+#+BEGIN_SRC python
+# loads() returns compacted data with lists
+data = kvl.loads("""
+tags = web
+tags = api
+tags = production
+""")
+# Result: {"tags": ["web", "api", "production"]}
+
+# Use for most application needs
+config = kvl.load("config.kvl")
+kvl.dump(config, "output.kvl")
+#+END_SRC
+
+** Low-Level API (Categorical)
+
+Access the raw categorical model for advanced use cases:
+
+#+BEGIN_SRC python
+# parse() returns categorical structure
+data = kvl.parse("""
+tags = web
+tags = api
+""")
+# Result: {"tags": {"web": {}, "api": {}, "production": {}}}
+
+# Use for:
+# - Direct access to merge semantics
+# - Schema-driven transformations
+# - Custom compaction strategies
+
+# Manual compaction if needed
+compacted = kvl.compact(data)
+#+END_SRC
+
+* Configurable Separators
+
+#+BEGIN_SRC python
+# Auto-detection from file headers
+data = kvl.loads("""
+#: kvl 1.0
+host: localhost
+port: 8080
+""")
+
+# Explicit configuration
+from kvl import KvlConfig
+
+config = KvlConfig(separator="->")
+data = kvl.loads("host -> localhost", config)
+
+# Use with CLI
+kvl format input.kvl --separator ":"
+#+END_SRC
+
+* Command Line Interface
+
+#+BEGIN_SRC bash
+# Validate files
+kvl validate config.kvl
+
+# Format files (stdout by default)
+kvl format config.kvl
+kvl format config.kvl --in-place
+
+# Convert between formats
+kvl convert input.json              # JSON to KVL (stdout)
+kvl convert input.yaml -o out.kvl   # YAML to KVL (file)
+
+# Merge configurations
+kvl merge base.kvl dev.kvl local.kvl
+
+# Set separator style
+kvl format config.kvl -s ":"
+
+# Run as Python module
+python -m kvl validate config.kvl
+#+END_SRC
+
+* Philosophy
+
+KVL follows CCL's philosophy of composable simplicity while adding practical features for Python:
+
+1. *Minimalism*: Just key-value pairs with indentation
+2. *No Magic*: Explicit behavior, no surprising type conversions
+3. *Composition*: Mathematically sound merging based on monoid properties
+4. *Flexibility*: Optional features that don't compromise the core model
+
+* Examples
+
+See the `examples/` directory for:
+- Basic syntax patterns
+- Schema definitions and validation
+- Configuration merging scenarios
+- Transform utilities usage
+
+* Related Projects
+
+- [[https://github.com/shcv/kvl/tree/main/spec][KVL Language Specification]] - Complete language documentation
+- [[https://github.com/shcv/kvl/tree/main/go][kvl (Go)]] - Go implementation
+- [[https://github.com/shcv/kvl/tree/main/zig][kvl (Zig)]] - High-performance Zig implementation
+- [[https://github.com/shcv/kvl/tree/main/javascript][kvl (JavaScript)]] - JavaScript implementation
+
+* Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Ensure all tests pass: `python -m pytest`
+5. Submit a pull request
+
+* Testing
+
+#+BEGIN_SRC bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run with coverage
+python -m pytest tests/ --cov=kvl --cov-report=html
+#+END_SRC
+
+* License
+
+This project is released under CC0 1.0 Universal (CC0 1.0) Public Domain Dedication.
+You can copy, modify, distribute and perform the work, even for commercial purposes,
+all without asking permission.
+
+For organizations requiring a warranty of title, a signed commercial license
+with warranty and indemnification is available. Contact: shcv@sdf.org

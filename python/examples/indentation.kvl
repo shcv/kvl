@@ -1,0 +1,8 @@
+test1 =
+  b = test
+  c = again
+
+test2 =
+      indented =
+    yo =
+  b =

@@ -1,0 +1,23 @@
+{
+  "server": {
+    "host": {
+      "localhost": {}
+    },
+    "address": {
+      "127.0.0.1": {}
+    }
+  },
+  "database": {
+    "name": {
+      "mydb": {}
+    },
+    "connection": {
+      "driver": {
+        "postgres": {}
+      },
+      "host": {
+        "db.example.com": {}
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+/= Basic KVL Example
+/= Simple key-value pairs and basic data types
+
+name = John Doe
+age = 30
+active = true
+balance = 1234.56
+
+/= Lists are created with repeated keys
+hobbies = reading
+hobbies = coding
+hobbies = gaming
+
+scores = 95
+scores = 87
+scores = 92
+scores = 88
+
+/= Nested object using indentation
+address =
+  street = 123 Main St
+  city = New York
+  zip = 10001

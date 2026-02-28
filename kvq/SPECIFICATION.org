@@ -1,0 +1,288 @@
+#+TITLE: kvq Query Language Specification
+#+AUTHOR: KVL Team
+#+DATE: 2025-01-20
+
+* Overview
+
+This document defines the query language syntax and semantics for kvq, the KVL query tool. The language is designed to be familiar to users of jq while being optimized for KVL's categorical data structures.
+
+* Syntax Grammar
+
+** Basic Path Expression
+#+BEGIN_SRC bnf
+query_expression := pipe_expression
+pipe_expression  := path_expression ('|' function_call)*
+path_expression  := path_component ('.' path_component)*
+path_component   := identifier | array_access
+array_access     := identifier? '[' (index | slice | iterator) ']'
+identifier       := [a-zA-Z_][a-zA-Z0-9_-]*
+#+END_SRC
+
+** Array Operations
+#+BEGIN_SRC bnf
+index     := integer
+slice     := integer? ':' integer?
+iterator  := ε  # empty for [] syntax
+integer   := '-'? [0-9]+
+#+END_SRC
+
+** Function Calls
+#+BEGIN_SRC bnf
+function_call := function_name
+function_name := 'length' | 'keys' | 'min' | 'max' | 'sum'
+#+END_SRC
+
+* Semantic Rules
+
+** Path Resolution
+1. Start with root data structure
+2. For each path component:
+   - If identifier: access object key, error if not found
+   - If array access: apply array operation to current value
+3. Return final value or error
+
+** Array Operation Semantics
+
+*** Indexing: =[n]=
+- *Positive index*: 0-based from start
+- *Negative index*: -1 is last element, -2 second-to-last, etc.
+- *Out of bounds*: Error with descriptive message
+- *Type compatibility*: Works on lists and categorical dictionaries
+
+*** Slicing: =[start:end]=
+- *Python semantics*: start inclusive, end exclusive
+- *Omitted start*: defaults to 0
+- *Omitted end*: defaults to length
+- *Negative indices*: converted relative to length
+- *Empty result*: valid, returns empty array
+
+*** Iteration: =[]=
+- *Lists*: returns each element
+- *Categorical dictionaries*: returns keys if values are empty, otherwise values
+- *Single values*: error
+
+** Type System
+
+*** Supported Types
+- *String*: UTF-8 text values
+- *Number*: Integers and floating-point (inferred from string content)
+- *Boolean*: true/false values
+- *Object*: Nested key-value structures
+- *Array*: Ordered collections (from repeated keys or explicit lists)
+- *Null*: Empty values
+
+*** Type Conversions
+- Numbers parsed from strings when used in numeric contexts
+- Categorical dictionaries converted to arrays for iteration
+- Empty dictionary values treated as presence markers
+
+** Function Semantics
+
+*** =length=
+- *Strings*: character count (UTF-8 aware)
+- *Arrays*: element count
+- *Objects*: key count
+- *Error*: on non-container types
+
+*** =keys=
+- *Objects*: returns array of key names
+- *Error*: on non-object types
+
+*** =min= / =max=
+- *Number arrays*: numeric comparison
+- *String arrays*: lexicographic comparison
+- *Mixed arrays*: attempt numeric conversion, fall back to string
+- *Empty arrays*: error
+
+*** =sum=
+- *Number arrays*: arithmetic sum
+- *String arrays*: attempt conversion to numbers
+- *Error*: on non-numeric values or empty arrays
+
+* Error Handling
+
+** Error Types
+- *Path Error*: Key not found, invalid path component
+- *Type Error*: Operation not supported on given type
+- *Index Error*: Array index out of bounds
+- *Parse Error*: Invalid query syntax
+- *Value Error*: Invalid function argument
+
+** Error Messages
+All errors include:
+- Clear description of what went wrong
+- Location information (path to error)
+- Suggested fixes when applicable
+
+** Exit Codes
+- *0*: Success
+- *1*: Query error (key not found, type mismatch)
+- *2*: Parse error (invalid query syntax)
+- *3*: I/O error (file not found, permission denied)
+- *4*: Invalid arguments
+
+* Output Formats
+
+** Default Format
+- *Single values*: Raw output (strings unquoted)
+- *Arrays*: One element per line
+- *Objects*: KVL format
+
+** JSON Format (=--json=)
+- *All types*: Standard JSON representation
+- *Compact*: Single line with minimal spacing
+- *Pretty*: Multi-line with indentation
+
+** KVL Format (=--kvl=)
+- *Objects*: Native KVL serialization
+- *Arrays*: Converted to categorical format
+- *Scalars*: KVL-compatible representation
+
+** Raw Format (=--raw=)
+- *Strings*: No quotes or escaping
+- *Numbers*: Plain numeric representation
+- *Arrays*: One element per line, no decoration
+- *Objects*: Error (use --json or --kvl)
+
+* Examples with Semantics
+
+** Basic Path Navigation
+#+BEGIN_SRC kvl
+# Input data
+server =
+  host = localhost
+  port = 8080
+  ssl = true
+
+# Query: server.host
+# Result: "localhost"
+
+# Query: server.port  
+# Result: "8080"
+
+# Query: server.missing
+# Error: Key 'missing' not found in server
+#+END_SRC
+
+** Array Operations
+#+BEGIN_SRC kvl
+# Input data
+tags = web
+tags = api  
+tags = production
+
+# Query: tags[]
+# Result (one per line):
+# web
+# api
+# production
+
+# Query: tags[0]
+# Result: "web"
+
+# Query: tags[-1]
+# Result: "production"
+
+# Query: tags[1:3]
+# Result (one per line):
+# api
+# production
+#+END_SRC
+
+** Nested Array Access
+#+BEGIN_SRC kvl
+# Input data
+servers =
+  = name = web1
+    port = 80
+  = name = web2
+    port = 8080
+
+# Query: servers[]
+# Result: Array of server objects
+
+# Query: servers[].name
+# Result (one per line):
+# web1
+# web2
+
+# Query: servers[0].port
+# Result: "80"
+#+END_SRC
+
+** Pipe Functions
+#+BEGIN_SRC kvl
+# Input data
+scores = 95
+scores = 87
+scores = 92
+
+# Query: scores[] | length
+# Result: 3
+
+# Query: scores | max
+# Result: 95
+
+# Query: scores | sum
+# Result: 274
+#+END_SRC
+
+** Complex Queries
+#+BEGIN_SRC kvl
+# Input data
+api =
+  v1 =
+    endpoints =
+      = users
+      = posts
+    rate_limit = 100
+  v2 =
+    endpoints =
+      = users
+      = posts  
+      = files
+    rate_limit = 200
+
+# Query: api | keys
+# Result (one per line):
+# v1
+# v2
+
+# Query: api[].endpoints[]
+# Result (one per line):
+# users
+# posts
+# users
+# posts
+# files
+
+# Query: api[].rate_limit | max
+# Result: 200
+#+END_SRC
+
+* Implementation Notes
+
+** Performance Considerations
+- Query parsing should be done once, execution can be repeated
+- Large arrays should be processed lazily when possible
+- Memory usage should be proportional to result size, not input size
+
+** Unicode Handling
+- All string operations must be UTF-8 aware
+- String indexing should work on grapheme clusters, not bytes
+- Sorting should use Unicode collation
+
+** Compatibility
+- KVL categorical structures and Python lists should be handled uniformly
+- Query results should be deterministic across different KVL implementations
+- Error messages should be consistent with KVL parser errors
+
+* Future Extensions
+
+** Potential Additions (Not Yet Specified)
+- Regular expression matching: =name | match("web.*")=
+- Array filtering: =servers[] | select(.port > 80)=
+- Object construction: ={name: .name, url: .host}=
+- Conditional expressions: =if .ssl then .port else 80 end=
+
+These extensions are not part of the current specification but may be considered for future versions.

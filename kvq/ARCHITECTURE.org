@@ -1,0 +1,342 @@
+#+TITLE: kvq Architecture Design
+#+AUTHOR: KVL Team  
+#+DATE: 2025-01-20
+
+* Overview
+
+kvq is designed as a high-performance, memory-efficient query tool for KVL files. The architecture prioritizes speed, low memory usage, and Unix integration while maintaining compatibility with the KVL specification.
+
+* Design Principles
+
+** Performance First
+- Native compiled binary (Zig implementation)
+- Zero-copy string processing where possible
+- Lazy evaluation for large datasets
+- Minimal memory allocations during query execution
+
+** Unix Philosophy
+- Do one thing well: query KVL files
+- Text-based input/output with multiple formats
+- Pipeline-friendly with appropriate exit codes
+- No configuration files or complex setup
+
+** Compatibility
+- Share parsing logic with kvl (Zig) library
+- Identical KVL interpretation across implementations
+- Consistent error messages and behavior
+- Future-proof extensibility
+
+* System Architecture
+
+#+BEGIN_SRC
+┌─────────────┐    ┌──────────────┐    ┌─────────────┐
+│   Input     │    │    Parser    │    │   Query     │
+│   Files     │───▶│   (kvl (Zig))  │───▶│   Engine    │
+│             │    │              │    │             │
+└─────────────┘    └──────────────┘    └─────────────┘
+                                              │
+┌─────────────┐    ┌──────────────┐          │
+│   Output    │◀───│  Formatter   │◀─────────┘
+│  (stdout)   │    │  (JSON/KVL)  │
+└─────────────┘    └──────────────┘
+#+END_SRC
+
+* Component Design
+
+** Command Line Interface
+*** Responsibilities
+- Argument parsing and validation
+- File handling (stdin, multiple files)
+- Error code management
+- Help and usage display
+
+*** Implementation
+#+BEGIN_SRC zig
+const Args = struct {
+    files: []const []const u8,
+    queries: []const []const u8,
+    format: OutputFormat,
+    raw_output: bool,
+    compact: bool,
+};
+
+pub fn parseArgs(allocator: Allocator) !Args {
+    // Parse command line arguments
+    // Handle --help, file detection, query extraction
+}
+#+END_SRC
+
+** KVL Parser Integration
+*** Shared Library
+- Use kvl (Zig) parser directly
+- Consistent configuration handling
+- Common error types and messages
+- Header processing (separators, list markers)
+
+*** Data Structure
+#+BEGIN_SRC zig
+const KvlValue = union(enum) {
+    string: []const u8,
+    object: std.StringHashMap(KvlValue),
+    array: []KvlValue,
+    empty: void,
+};
+#+END_SRC
+
+** Query Engine
+*** Query AST
+#+BEGIN_SRC zig
+const Query = struct {
+    path: []PathComponent,
+    pipes: []PipeFunction,
+};
+
+const PathComponent = union(enum) {
+    key: []const u8,
+    index: i32,
+    slice: struct { start: ?i32, end: ?i32 },
+    iterator: void,
+};
+
+const PipeFunction = enum {
+    length,
+    keys,
+    min,
+    max,
+    sum,
+};
+#+END_SRC
+
+*** Query Parser
+#+BEGIN_SRC zig
+pub fn parseQuery(query_str: []const u8, allocator: Allocator) !Query {
+    // Recursive descent parser for query expressions
+    // Handle dot notation, array operations, pipes
+}
+#+END_SRC
+
+*** Query Executor
+#+BEGIN_SRC zig
+pub fn executeQuery(query: Query, data: KvlValue, allocator: Allocator) !QueryResult {
+    // Execute parsed query against KVL data
+    // Handle type conversions and error propagation
+}
+
+const QueryResult = union(enum) {
+    single: KvlValue,
+    multiple: []KvlValue,
+    error_info: QueryError,
+};
+#+END_SRC
+
+** Output Formatting
+*** Format Abstraction
+#+BEGIN_SRC zig
+const OutputFormat = enum {
+    auto,
+    json,
+    kvl,
+    raw,
+};
+
+pub fn formatOutput(
+    result: QueryResult,
+    format: OutputFormat,
+    options: FormatOptions,
+    writer: anytype,
+) !void {
+    // Format query results according to specified format
+}
+#+END_SRC
+
+*** JSON Formatter
+- Standard JSON encoding
+- Compact and pretty-print modes
+- Proper escape sequences and UTF-8 handling
+
+*** KVL Formatter
+- Use kvl (Zig) serializer
+- Maintain format consistency
+- Handle list vs categorical representation
+
+*** Raw Formatter
+- Minimal decoration
+- One-per-line for arrays
+- String values without quotes
+
+* Memory Management
+
+** Allocation Strategy
+- Use arena allocator for query lifetime
+- Parse once, execute multiple times
+- Minimal copying of string data
+- Lazy evaluation for large arrays
+
+** Memory Layout
+#+BEGIN_SRC zig
+const QuerySession = struct {
+    arena: std.heap.ArenaAllocator,
+    data: KvlValue,
+    queries: []Query,
+    
+    pub fn init(allocator: Allocator) QuerySession {
+        return QuerySession{
+            .arena = std.heap.ArenaAllocator.init(allocator),
+            .data = undefined,
+            .queries = undefined,
+        };
+    }
+    
+    pub fn deinit(self: *QuerySession) void {
+        self.arena.deinit();
+    }
+};
+#+END_SRC
+
+* Error Handling
+
+** Error Types
+#+BEGIN_SRC zig
+const QueryError = union(enum) {
+    parse_error: struct {
+        message: []const u8,
+        position: usize,
+    },
+    key_not_found: struct {
+        key: []const u8,
+        path: []const u8,
+    },
+    type_mismatch: struct {
+        expected: []const u8,
+        actual: []const u8,
+        path: []const u8,
+    },
+    index_out_of_bounds: struct {
+        index: i32,
+        length: usize,
+        path: []const u8,
+    },
+    io_error: std.fs.File.OpenError,
+};
+#+END_SRC
+
+** Error Reporting
+- Structured error messages with context
+- Path information showing where error occurred
+- Suggestions for common mistakes
+- Consistent formatting with kvl (Zig) parser
+
+* Performance Optimizations
+
+** String Handling
+- Zero-copy slicing where possible
+- Intern common strings (true, false, empty)
+- UTF-8 validation only when necessary
+- Avoid unnecessary allocations
+
+** Query Execution
+- Short-circuit evaluation for boolean operations
+- Lazy iteration for array operations
+- Memoization for repeated subqueries
+- Efficient path traversal
+
+** I/O Optimization
+- Buffered file reading
+- Streaming output for large results
+- Memory-mapped files for large inputs
+- Async I/O for multiple files
+
+* Testing Strategy
+
+** Unit Tests
+- Query parser correctness
+- Individual function behavior
+- Error condition handling
+- Memory leak detection
+
+** Integration Tests  
+- End-to-end query execution
+- Multiple file merging
+- Output format validation
+- Performance benchmarks
+
+** Property-Based Testing
+- Query equivalence across data transforms
+- Round-trip serialization consistency
+- Error message determinism
+- Unicode handling correctness
+
+* Build System
+
+** Zig Build Configuration
+#+BEGIN_SRC zig
+// build.zig
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    
+    const exe = b.addExecutable(.{
+        .name = "kvq",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    // Link with kvl (Zig) library
+    const kvl_lib = b.dependency("kvl (Zig)", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    exe.linkLibrary(kvl_lib.artifact("kvl"));
+    b.installArtifact(exe);
+}
+#+END_SRC
+
+** Release Configuration
+- Static linking for distribution
+- LTO (Link Time Optimization) enabled
+- Strip debug symbols for production
+- Cross-compilation for multiple platforms
+
+* Integration Points
+
+** kvl (Zig) Library
+- Shared parser and data structures
+- Common configuration handling
+- Consistent error types
+- Version compatibility
+
+** Unix Tools
+- Standard input/output streams
+- Appropriate exit codes
+- Signal handling (SIGPIPE, SIGINT)
+- Environment variable support
+
+** Package Managers
+- GitHub releases with binaries
+- Homebrew formula
+- APT/RPM packages
+- Docker container images
+
+* Future Extensibility
+
+** Plugin Architecture
+- Function registration system
+- Custom output formatters
+- External data source integration
+- User-defined operators
+
+** Language Extensions
+- Regular expression support
+- Conditional expressions
+- Object construction syntax
+- Advanced filtering operations
+
+** Performance Enhancements
+- Parallel query execution
+- Caching layer for repeated queries
+- JIT compilation for complex queries
+- SIMD optimization for numeric operations
+
+This architecture provides a solid foundation for a high-performance, maintainable, and extensible KVL query tool that integrates well with existing Unix workflows while leveraging the efficiency of Zig and the consistency of the kvl (Zig) parser.

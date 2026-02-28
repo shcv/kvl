@@ -1,0 +1,107 @@
+#+TITLE: KVL Language Specification
+
+This repository contains the official specification for KVL (Key-Value Language).
+
+* Contents
+
+- [[./docs/language-specification.org][Language Specification]] - Complete syntax and semantics
+- [[./docs/mathematical-properties.org][Mathematical Properties]] - Semigroup theory and compositional semantics
+- [[./docs/implementation-guide.org][Implementation Guide]] - Best practices for language implementers
+- [[./docs/schema-guide.org][Schema System Guide]] - Validation system specification
+- [[./examples/][Examples]] - Sample KVL files demonstrating features
+- [[./schemas/][Schemas]] - Example schema files
+
+* What is KVL?
+
+KVL is a minimalist configuration format with three core principles:
+
+1. *Simplicity* - Clean syntax with minimal boilerplate
+2. *Composability* - Mathematical merge operations (monoid properties)
+3. *Mathematical Soundness* - Associative merging where =(A + B) + C = A + (B + C)=
+
+It was originally based on CCL by Dmitrii Kovanikov (chshersh), then extended.
+In exchange for some mathematical purity, KVL gains:
+  - automatic conversion for lists (repeated empty keys)
+  - flexible separators (specified via header)
+  - schemas for validation and type conversion
+  - list item markers
+
+* Key Features
+
+- Human-readable syntax with minimal boilerplate
+- Indentation-based nesting (no braces or brackets)
+- Automatic list creation from repeated keys
+- List markers (=-=, =+=, =*=) for improved readability
+- Flexible separators (===, =:=, =->= configurable via header)
+- Escape sequences for separators in values
+- Comment retention as conventional keys
+- Type conversion and validation via schemas
+- Associative merge operations (monoid properties)
+
+* Implementations
+
+- [[../python/][python]] - Python implementation (reference)
+- [[../go/][go]] - Go implementation
+- [[../zig/][zig]] - Zig implementation
+- [[../js/][js]] - JavaScript/TypeScript (planned)
+
+* Examples
+
+** Basic Configuration
+
+#+begin_src kvl
+#= kvl 1.0
+/= Comments are parsed as conventional keys (can be filtered by schemas)
+name = My Application
+version = 1.0.0
+
+server =
+    host = localhost
+    port = 8080
+
+/= Lists via repeated keys (auto-compacted to arrays in user API)
+tags = production
+tags = web
+tags = api
+#+end_src
+
+** List Markers
+
+#+begin_src kvl
+#= kvl 1.0 -
+/= Declare list markers in header for improved readability
+
+dependencies =
+  - react
+  - typescript
+  - webpack
+
+priorities =
+  - high
+  - medium
+  - low
+#+end_src
+
+** Escape Sequences
+
+#+begin_src kvl
+#= kvl 1.0
+/= Use backslash to escape the separator character in values
+equation = x\=y+z
+key\=name = value with equals in key
+/= Backslash before non-separator is literal
+path = C:\Users\Name
+#+end_src
+
+** Flexible Separators
+
+#+begin_src kvl
+#: kvl 1.0 space-before=false
+/= Use colon separator with kebab-case options
+host: localhost
+port: 8080
+items:
+  name: web-server
+  active: true
+#+end_src
+

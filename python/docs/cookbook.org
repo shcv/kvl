@@ -1,0 +1,919 @@
+#+TITLE: KVL Cookbook
+
+* Introduction
+
+This cookbook provides practical recipes and patterns for common KVL use cases. Each recipe includes working code examples and explanations.
+
+* Configuration Management
+
+** Basic Application Configuration
+
+#+BEGIN_SRC python
+# config.kvl
+"""
+name = MyApp
+version = 1.2.0
+
+server =
+  host = 0.0.0.0
+  port = 8080
+  workers = 4
+
+database =
+  url = postgresql://localhost/myapp
+  pool_size = 10
+  
+logging =
+  level = INFO
+  file = /var/log/myapp.log
+"""
+
+# Load configuration
+import kvl
+
+config = kvl.load("config.kvl")
+
+# Access nested values
+server_host = config["server"]["host"]
+db_url = config["database"]["url"]
+
+# With defaults
+log_level = config.get("logging", {}).get("level", "WARNING")
+#+END_SRC
+
+** Environment-Specific Overrides
+
+#+BEGIN_SRC python
+# base.kvl
+"""
+app_name = MyService
+debug = false
+
+database =
+  host = localhost
+  port = 5432
+"""
+
+# development.kvl
+"""
+debug = true
+database =
+  name = myapp_dev
+"""
+
+# production.kvl  
+"""
+database =
+  host = db.production.internal
+  name = myapp_prod
+  ssl = required
+"""
+
+# Load and merge configurations at application level
+import os
+import kvl
+
+# Load base configuration
+base_config = kvl.load("base.kvl")
+
+# Load environment-specific config
+env = os.getenv("APP_ENV", "development")
+env_config = kvl.load(f"{env}.kvl")
+
+# Merge configurations (base + environment)
+config = kvl.merge(base_config, env_config)
+#+END_SRC
+
+** Feature Flags
+
+#+BEGIN_SRC python
+# features.kvl
+"""
+features = new_ui
+features = dark_mode
+features = analytics
+features = beta_api
+
+feature_config =
+  new_ui =
+    rollout_percentage = 50
+  dark_mode =
+    enabled_for = premium_users
+  beta_api =
+    whitelist = internal
+    whitelist = partners
+"""
+
+from kvl import Schema, compact
+
+# Schema for feature flags
+feature_schema = Schema({
+    "features": list,
+    "feature_config": dict
+})
+
+config = feature_schema.load("features.kvl")
+
+# Check if feature is enabled
+def is_feature_enabled(feature_name):
+    return feature_name in config["features"]
+
+# Get feature configuration
+def get_feature_config(feature_name):
+    return config["feature_config"].get(feature_name, {})
+#+END_SRC
+
+* Schema Validation Patterns
+
+** User Input Validation
+
+#+BEGIN_SRC python
+from kvl import Schema
+import re
+
+# Email validation
+def valid_email(email):
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, email))
+
+# Password strength
+def strong_password(password):
+    return (len(password) >= 8 and
+            any(c.isupper() for c in password) and
+            any(c.islower() for c in password) and
+            any(c.isdigit() for c in password))
+
+user_schema = Schema({
+    "username": (str, lambda v: 3 <= len(v) <= 20),
+    "email": (str, valid_email),
+    "password": (str, strong_password),
+    "age": (int, lambda v: 13 <= v <= 120),
+    "roles": list
+})
+
+# Validate user data
+try:
+    user = user_schema.loads("""
+    username = johndoe
+    email = john@example.com
+    password = SecurePass123
+    age = 25
+    roles = user
+    roles = contributor
+    """)
+    print("User validated successfully")
+except KvlValidationError as e:
+    print(f"Validation failed: {e}")
+#+END_SRC
+
+** API Configuration with Constraints
+
+#+BEGIN_SRC python
+from kvl import Schema
+from datetime import datetime
+
+# Custom validators
+def valid_url(url):
+    return url.startswith(('http://', 'https://'))
+
+def valid_timeout(seconds):
+    return 0.1 <= seconds <= 300
+
+api_schema = Schema({
+    "base_url": (str, valid_url),
+    "timeout": (float, valid_timeout),
+    "retry_count": (int, lambda v: 0 <= v <= 10),
+    "endpoints": dict,
+    "headers": dict
+})
+
+# api_config.kvl
+"""
+base_url = https://api.example.com
+timeout = 30.0
+retry_count = 3
+
+endpoints =
+  users = /v1/users
+  posts = /v1/posts
+  auth = /v1/auth
+
+headers =
+  User-Agent = MyApp/1.0
+  Accept = application/json
+"""
+
+config = api_schema.load("api_config.kvl")
+#+END_SRC
+
+* Data Transformation Recipes
+
+** CSV-like Data in KVL
+
+#+BEGIN_SRC python
+# data.kvl
+"""
+users =
+  1 =
+    name = Alice
+    email = alice@example.com
+    role = admin
+  2 =
+    name = Bob
+    email = bob@example.com
+    role = user
+  3 =
+    name = Charlie
+    email = charlie@example.com
+    role = user
+"""
+
+import kvl
+
+# Load and convert to list of records
+data = kvl.load("data.kvl")
+users = data["users"]
+
+# Convert to list of dicts
+user_list = [
+    {"id": user_id, **user_data}
+    for user_id, user_data in users.items()
+]
+
+# Query operations
+admins = [u for u in user_list if u.get("role") == "admin"]
+emails = [u["email"] for u in user_list]
+#+END_SRC
+
+** Hierarchical Menu Structure
+
+#+BEGIN_SRC python
+# menu.kvl
+"""
+menu =
+  file =
+    new = Ctrl+N
+    open = Ctrl+O
+    save = Ctrl+S
+    separator1 =
+    exit = Alt+F4
+    
+  edit =
+    undo = Ctrl+Z
+    redo = Ctrl+Y
+    separator1 =
+    cut = Ctrl+X
+    copy = Ctrl+C
+    paste = Ctrl+V
+    
+  view =
+    fullscreen = F11
+    zoom =
+      in = Ctrl++
+      out = Ctrl+-
+      reset = Ctrl+0
+"""
+
+def build_menu(menu_data):
+    """Convert KVL menu to GUI menu structure."""
+    items = []
+    for key, value in menu_data.items():
+        if key.startswith("separator"):
+            items.append({"type": "separator"})
+        elif isinstance(value, dict):
+            # Submenu
+            items.append({
+                "type": "submenu",
+                "label": key.title(),
+                "items": build_menu(value)
+            })
+        else:
+            # Menu item
+            items.append({
+                "type": "item",
+                "label": key.title(),
+                "shortcut": value
+            })
+    return items
+
+data = kvl.load("menu.kvl")
+menu_structure = build_menu(data["menu"])
+#+END_SRC
+
+* Working with Lists
+
+** Managing Collections
+
+#+BEGIN_SRC python
+# inventory.kvl with compact mode
+"""
+#= kvl 1.0 compact
+
+products =
+  laptop =
+    name = ThinkPad X1
+    price = 1299
+    tags = electronics
+    tags = computers
+    tags = portable
+    
+  phone =
+    name = iPhone 13
+    price = 799
+    tags = electronics
+    tags = mobile
+    
+  desk =
+    name = Standing Desk
+    price = 599
+    tags = furniture
+    tags = office
+"""
+
+from kvl import Schema
+
+inventory_schema = Schema({
+    "products": dict
+}, compact=True)
+
+data = inventory_schema.load("inventory.kvl")
+
+# Find all products with a specific tag
+def find_by_tag(tag):
+    results = []
+    for pid, product in data["products"].items():
+        if tag in product.get("tags", []):
+            results.append({"id": pid, **product})
+    return results
+
+electronics = find_by_tag("electronics")
+#+END_SRC
+
+** Configuration Arrays
+
+#+BEGIN_SRC python
+# servers.kvl
+"""
+servers = web1.example.com
+servers = web2.example.com
+servers = web3.example.com
+
+server_config =
+  web1.example.com =
+    ip = 10.0.1.1
+    role = primary
+    datacenter = us-east
+    
+  web2.example.com =
+    ip = 10.0.1.2
+    role = secondary
+    datacenter = us-east
+    
+  web3.example.com =
+    ip = 10.0.2.1
+    role = secondary
+    datacenter = us-west
+"""
+
+import kvl
+from kvl import compact
+
+data = kvl.load("servers.kvl")
+data = compact(data)
+
+# Round-robin load balancing
+class LoadBalancer:
+    def __init__(self, servers):
+        self.servers = servers
+        self.current = 0
+    
+    def get_next(self):
+        server = self.servers[self.current]
+        self.current = (self.current + 1) % len(self.servers)
+        return server
+
+lb = LoadBalancer(data["servers"])
+#+END_SRC
+
+* Integration Patterns
+
+** Flask Configuration
+
+#+BEGIN_SRC python
+# flask_config.kvl
+"""
+app =
+  name = MyFlaskApp
+  debug = true
+  secret_key = dev-secret-key-change-in-production
+  
+database =
+  uri = sqlite:///app.db
+  track_modifications = false
+  
+redis =
+  host = localhost
+  port = 6379
+  db = 0
+  
+features =
+  registration = true
+  social_login = false
+  api_v2 = true
+"""
+
+# config.py
+import kvl
+from kvl import Schema
+
+# Define schema with types
+config_schema = Schema({
+    "app": {
+        "name": str,
+        "debug": bool,
+        "secret_key": str
+    },
+    "database": {
+        "uri": str,
+        "track_modifications": bool
+    },
+    "redis": {
+        "host": str,
+        "port": int,
+        "db": int
+    },
+    "features": dict
+})
+
+def load_config(env="development"):
+    """Load Flask configuration from KVL."""
+    config = config_schema.load(f"{env}_config.kvl")
+    
+    class Config:
+        # Flask settings
+        APP_NAME = config["app"]["name"]
+        DEBUG = config["app"]["debug"]
+        SECRET_KEY = config["app"]["secret_key"]
+        
+        # SQLAlchemy settings
+        SQLALCHEMY_DATABASE_URI = config["database"]["uri"]
+        SQLALCHEMY_TRACK_MODIFICATIONS = config["database"]["track_modifications"]
+        
+        # Redis settings
+        REDIS_URL = f"redis://{config['redis']['host']}:{config['redis']['port']}/{config['redis']['db']}"
+        
+        # Feature flags
+        FEATURES = config["features"]
+    
+    return Config
+
+# app.py
+from flask import Flask
+app = Flask(__name__)
+app.config.from_object(load_config())
+#+END_SRC
+
+** Django Settings
+
+#+BEGIN_SRC python
+# settings.kvl
+"""
+django =
+  debug = true
+  allowed_hosts = localhost
+  allowed_hosts = 127.0.0.1
+  secret_key = django-insecure-key
+  
+database =
+  engine = django.db.backends.postgresql
+  name = myproject
+  user = postgres
+  password = postgres
+  host = localhost
+  port = 5432
+  
+installed_apps = django.contrib.admin
+installed_apps = django.contrib.auth
+installed_apps = django.contrib.contenttypes
+installed_apps = django.contrib.sessions
+installed_apps = django.contrib.messages
+installed_apps = django.contrib.staticfiles
+installed_apps = myapp
+installed_apps = rest_framework
+
+middleware = django.middleware.security.SecurityMiddleware
+middleware = django.contrib.sessions.middleware.SessionMiddleware
+middleware = django.middleware.common.CommonMiddleware
+"""
+
+# settings.py
+import kvl
+from kvl import compact
+
+# Load KVL configuration
+kvl_config = kvl.load("settings.kvl")
+kvl_config = compact(kvl_config)
+
+# Django settings
+DEBUG = kvl_config["django"]["debug"]
+SECRET_KEY = kvl_config["django"]["secret_key"]
+ALLOWED_HOSTS = kvl_config["django"]["allowed_hosts"]
+
+DATABASES = {
+    'default': kvl_config["database"]
+}
+
+INSTALLED_APPS = kvl_config["installed_apps"]
+MIDDLEWARE = kvl_config["middleware"]
+#+END_SRC
+
+* Testing with KVL
+
+** Test Data Fixtures
+
+#+BEGIN_SRC python
+# test_data.kvl
+"""
+users =
+  valid_user =
+    username = testuser
+    email = test@example.com
+    password = ValidPass123
+    
+  invalid_email =
+    username = baduser
+    email = not-an-email
+    password = ValidPass123
+    
+  weak_password =
+    username = weakuser
+    email = weak@example.com
+    password = 123
+
+test_cases = valid_user
+test_cases = invalid_email  
+test_cases = weak_password
+"""
+
+import pytest
+import kvl
+from kvl import compact
+
+@pytest.fixture
+def test_data():
+    data = kvl.load("test_data.kvl")
+    return compact(data)
+
+def test_user_validation(test_data, user_schema):
+    for test_case in test_data["test_cases"]:
+        user_data = test_data["users"][test_case]
+        
+        if "invalid" in test_case or "weak" in test_case:
+            with pytest.raises(KvlValidationError):
+                user_schema.validate(user_data)
+        else:
+            # Should validate successfully
+            result = user_schema.validate(user_data)
+            assert result is True
+#+END_SRC
+
+** Configuration for Tests
+
+#+BEGIN_SRC python
+# test_config.kvl
+"""
+test_database =
+  url = sqlite:///:memory:
+  echo = false
+  
+test_api =
+  base_url = http://localhost:8000
+  timeout = 5.0
+  mock = true
+  
+test_users = alice
+test_users = bob
+test_users = charlie
+
+test_user_data =
+  alice =
+    role = admin
+    permissions = read
+    permissions = write
+    permissions = delete
+  bob =
+    role = user
+    permissions = read
+"""
+
+# conftest.py
+import pytest
+import kvl
+from kvl import Schema, compact
+
+@pytest.fixture(scope="session")
+def test_config():
+    schema = Schema({
+        "test_database": dict,
+        "test_api": dict,
+        "test_users": list,
+        "test_user_data": dict
+    })
+    config = schema.load("test_config.kvl")
+    return config
+
+@pytest.fixture
+def test_db(test_config):
+    # Setup test database
+    from sqlalchemy import create_engine
+    engine = create_engine(test_config["test_database"]["url"])
+    # ... setup tables
+    yield engine
+    # ... cleanup
+#+END_SRC
+
+* CLI Automation
+
+** Build Configuration
+
+#+BEGIN_SRC python
+# build.kvl
+"""
+project =
+  name = myproject
+  version = 1.0.0
+  author = Your Name
+  
+build =
+  source_dir = src
+  output_dir = dist
+  include = *.py
+  include = *.kvl
+  include = README.md
+  exclude = __pycache__
+  exclude = *.pyc
+  exclude = .git
+  
+dependencies = requests
+dependencies = click
+dependencies = kvl
+
+dev_dependencies = pytest
+dev_dependencies = black
+dev_dependencies = mypy
+"""
+
+# build.py
+import kvl
+from kvl import compact
+import subprocess
+import shutil
+from pathlib import Path
+
+def build_project():
+    config = kvl.load("build.kvl")
+    config = compact(config)
+    
+    project = config["project"]
+    build = config["build"]
+    
+    # Create dist directory
+    dist_dir = Path(build["output_dir"])
+    dist_dir.mkdir(exist_ok=True)
+    
+    # Copy files
+    for pattern in build["include"]:
+        for file in Path(build["source_dir"]).glob(pattern):
+            if not any(file.match(exc) for exc in build["exclude"]):
+                shutil.copy2(file, dist_dir)
+    
+    # Install dependencies
+    for dep in config["dependencies"]:
+        subprocess.run(["pip", "install", dep])
+    
+    print(f"Built {project['name']} v{project['version']}")
+
+if __name__ == "__main__":
+    build_project()
+#+END_SRC
+
+** Task Runner
+
+#+BEGIN_SRC python
+# tasks.kvl
+"""
+tasks =
+  test =
+    command = pytest tests/
+    description = Run all tests
+    
+  format =
+    command = black .
+    description = Format code with Black
+    
+  lint =
+    command = mypy kvl/
+    description = Type check with mypy
+    
+  docs =
+    command = sphinx-build docs/ docs/_build
+    description = Build documentation
+    
+  clean =
+    command = rm -rf dist/ build/ *.egg-info
+    description = Clean build artifacts
+    
+workflows =
+  ci = lint
+  ci = test
+  
+  release = clean
+  release = test
+  release = build
+  release = publish
+"""
+
+# tasks.py
+#!/usr/bin/env python
+import sys
+import subprocess
+import kvl
+from kvl import compact
+
+def run_task(task_name):
+    config = kvl.load("tasks.kvl")
+    config = compact(config)
+    
+    tasks = config["tasks"]
+    workflows = config.get("workflows", {})
+    
+    if task_name in workflows:
+        # Run workflow
+        for task in workflows[task_name]:
+            run_task(task)
+    elif task_name in tasks:
+        # Run single task
+        task = tasks[task_name]
+        print(f"🔧 {task['description']}")
+        subprocess.run(task["command"], shell=True)
+    else:
+        print(f"Unknown task: {task_name}")
+        print("Available tasks:", ", ".join(tasks.keys()))
+        print("Available workflows:", ", ".join(workflows.keys()))
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        run_task(sys.argv[1])
+    else:
+        print("Usage: ./tasks.py <task_name>")
+#+END_SRC
+
+* Advanced Patterns
+
+** Plugin System
+
+#+BEGIN_SRC python
+# plugins.kvl
+"""
+plugins = auth
+plugins = cache  
+plugins = metrics
+
+plugin_config =
+  auth =
+    provider = oauth2
+    client_id = your-client-id
+    client_secret = your-secret
+    scopes = read
+    scopes = write
+    
+  cache =
+    backend = redis
+    ttl = 3600
+    prefix = myapp
+    
+  metrics =
+    backend = prometheus
+    port = 9090
+    path = /metrics
+"""
+
+# plugin_loader.py
+import importlib
+import kvl
+from kvl import Schema
+
+class PluginSystem:
+    def __init__(self, config_file):
+        schema = Schema({
+            "plugins": list,
+            "plugin_config": dict
+        })
+        self.config = schema.load(config_file)
+        self.loaded_plugins = {}
+    
+    def load_plugin(self, name):
+        if name not in self.config["plugins"]:
+            raise ValueError(f"Plugin {name} not enabled")
+        
+        # Import plugin module
+        module = importlib.import_module(f"plugins.{name}")
+        
+        # Get plugin config
+        plugin_config = self.config["plugin_config"].get(name, {})
+        
+        # Initialize plugin
+        plugin = module.Plugin(plugin_config)
+        self.loaded_plugins[name] = plugin
+        
+        return plugin
+    
+    def load_all(self):
+        for plugin_name in self.config["plugins"]:
+            self.load_plugin(plugin_name)
+    
+    def get_plugin(self, name):
+        return self.loaded_plugins.get(name)
+
+# Usage
+plugins = PluginSystem("plugins.kvl")
+plugins.load_all()
+
+auth = plugins.get_plugin("auth")
+cache = plugins.get_plugin("cache")
+#+END_SRC
+
+** Multi-Tenant Configuration
+
+#+BEGIN_SRC python
+# tenants.kvl
+"""
+defaults =
+  timezone = UTC
+  language = en
+  theme = light
+  features = core
+
+tenants =
+  acme_corp =
+    name = ACME Corporation
+    domain = acme.example.com
+    timezone = America/New_York
+    theme = dark
+    features = core
+    features = advanced
+    features = api
+    
+  widgets_inc =
+    name = Widgets Inc
+    domain = widgets.example.com
+    language = es
+    features = core
+    features = reports
+    
+  test_tenant =
+    name = Test Tenant
+    domain = test.localhost
+    debug = true
+    features = core
+    features = advanced
+    features = api
+    features = debug
+"""
+
+import kvl
+from kvl import compact, merge
+
+class TenantConfig:
+    def __init__(self, config_file):
+        data = kvl.load(config_file)
+        self.data = compact(data)
+        self.defaults = self.data.get("defaults", {})
+        self.tenants = self.data.get("tenants", {})
+    
+    def get_tenant_config(self, tenant_id):
+        if tenant_id not in self.tenants:
+            raise ValueError(f"Unknown tenant: {tenant_id}")
+        
+        # Merge defaults with tenant-specific config
+        tenant_config = self.tenants[tenant_id]
+        return merge(self.defaults, tenant_config)
+    
+    def get_tenant_by_domain(self, domain):
+        for tenant_id, config in self.tenants.items():
+            if config.get("domain") == domain:
+                return tenant_id, self.get_tenant_config(tenant_id)
+        return None, None
+
+# Middleware example
+def tenant_middleware(request):
+    config = TenantConfig("tenants.kvl")
+    domain = request.host
+    
+    tenant_id, tenant_config = config.get_tenant_by_domain(domain)
+    if tenant_config:
+        request.tenant = tenant_config
+    else:
+        # Use default config
+        request.tenant = config.defaults
+#+END_SRC

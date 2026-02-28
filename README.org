@@ -1,0 +1,129 @@
+#+TITLE: KVL - Key-Value Language
+#+SUBTITLE: Flexible Configuration Format with Mathematical Merge Operations
+
+* Overview
+
+KVL (Key-Value Language) is a minimalist configuration format derived from CCL (Categorical Configuration Language) by Dmitrii Kovanikov (chshersh). It emphasizes three core principles:
+
+1. *Simplicity* - Clean syntax with minimal boilerplate
+2. *Composability* - Mathematical merge operations with semigroup properties  
+3. *Mathematical Soundness* - Associative merging where =(A + B) + C = A + (B + C)=
+
+** Language Specification
+
+The complete language specification is maintained in the [[file:spec/][spec/]] directory:
+- [[file:spec/docs/language-specification.org][Language Specification]] - Complete syntax and semantics
+- [[file:spec/docs/schema-guide.org][Schema System Guide]] - Validation system specification
+- [[file:spec/docs/implementations.org][Implementation Guide]] - Guidelines for implementers
+
+** Key Features
+
+- *Field-oriented schema system* - Validate data based on field names, not rigid object structures
+- *Associative merging* - Combine configurations predictably
+- *Categorical structure* - Repeated keys create nested categorical mappings
+- *Multiple separators* - Support for =, :, ->, := and custom separators
+- *Type inference* - Automatic detection of strings, numbers, and booleans
+
+* Quick Example
+
+#+begin_src kvl
+/= Comments start with /=
+
+/= Simple key-value pairs (strings by default)
+name = John Doe
+age = 30
+active = true
+
+/= Nested objects via indentation
+server = 
+    host = localhost
+    port = 8080
+    ssl = true
+
+/= Repeated keys create categorical structure (NOT arrays)
+tags = web
+tags = api
+tags = production
+/= Categorical form: tags = { web = {}, api = {}, production = {} }
+/= Note: Implementations may provide convenience functions to convert to arrays
+#+end_src
+
+** Configuration Headers
+
+KVL files can specify processing options via headers:
+
+#+begin_src kvl
+#= kvl 1.0 compact
+#: kvl 1.0 
+#-> kvl 1.0 space-around
+#+end_src
+
+** Merge Semantics
+
+KVL configurations are semigroups with associative merge operations:
+
+- *Simple values* - Later overrides earlier
+- *Nested objects* - Recursive merge
+- *Repeated keys* - Merged into nested categorical structure
+- *Mathematical property* - =(A + B) + C = A + (B + C)=
+
+* Schema System
+
+The KVL schema system provides flexible, recursive validation using field-oriented matching. See the [[file:spec/docs/schema-guide.org][Schema Guide]] in the specification repository for complete documentation.
+
+** Core Concepts
+
+- *Field-oriented validation* - Field specs apply based on field names, not object structure
+- *Recursive matching* - Schema validation traverses data recursively
+- *Hierarchical scoping* - Context-specific specs override global ones
+- *Open/closed schemas* - Control validation coverage
+- *Required field validation* - Per-field and schema-level requirements
+
+** Example Schema
+
+#+begin_src kvl
+#= kvl 1.0 schema open optional
+
+/= Global field specifications (apply anywhere)
+population = int
+capital = string
+median_income = int
+
+/= Context-specific validation
+server = 
+    port = 
+        type = int
+        min = 8000
+        max = 9000
+    ssl = bool
+#+end_src
+
+* Implementations
+
+** Production Ready
+- *[[file:python/][python]]* - Python implementation with complete API, schema validation, and merge operations
+- *[[file:go/][go]]* - Go implementation with Parse/Load API and compact/expand transforms
+
+** Working Implementations
+- *[[file:zig/][zig]]* - Zig implementation with parser, serializer, and merge operations
+- *[[file:javascript/][javascript]]* - JavaScript implementation with complete API and merge operations
+
+* Repository Structure
+
+- [[file:spec/][spec/]] - Language specification and documentation
+- [[file:python/][python/]] - Python implementation (reference)
+- [[file:go/][go/]] - Go implementation
+- [[file:zig/][zig/]] - Zig implementation
+- [[file:javascript/][javascript/]] - JavaScript implementation
+- [[file:fixtures/][fixtures/]] - Canonical test fixtures shared across implementations
+- [[file:conformance/][conformance/]] - Cross-implementation conformance test harness
+- [[file:emacs/][emacs/]] - Emacs major mode for KVL
+- [[file:kvq/][kvq/]] - KVL query tool
+
+* License
+
+[License information]
+
+* Contributing
+
+[Contributing guidelines]

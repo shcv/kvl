@@ -1,0 +1,51 @@
+/= Basic KVL syntax examples
+
+/= Simple key-value pairs
+name = John Doe
+age = 30
+email = john@example.com
+active = true
+
+/= Nested objects using indentation
+server = 
+    host = localhost
+    port = 8080
+    ssl = true
+    config = 
+        timeout = 30
+        retries = 3
+        debug = false
+
+/= Repeated keys create categorical structure
+tags = web
+tags = api
+tags = production
+tags = monitoring
+
+/= Empty values for categorical flags
+features = 
+    = experimental-ui
+    = new-search
+    = beta-analytics
+
+/= Mixed nesting and repetition
+environments = 
+    development = 
+        database = 
+            host = dev-db
+            port = 5432
+        cache = 
+            host = dev-cache
+            port = 6379
+    production = 
+        database = 
+            host = prod-db
+            port = 5432
+        cache = 
+            host = prod-cache
+            port = 6379
+
+/= Multiple separators supported
+deployment: docker
+monitoring -> prometheus
+alerts := pagerduty

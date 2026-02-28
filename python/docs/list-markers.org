@@ -1,0 +1,125 @@
+#+TITLE: List Markers in KVL
+#+AUTHOR: KVL Team
+#+DATE: 2024-01-15
+
+* Overview
+
+KVL extends the original CCL design with list markers - special characters that denote list items when they appear at the beginning of a line followed by a space.
+
+* Header Syntax
+
+List markers are specified in the KVL header after the version:
+
+#+BEGIN_SRC kvl
+#= kvl 1.0 -
+#: kvl 1.0 -+*
+#+END_SRC
+
+Each character in the list marker string becomes a valid list marker. Common choices:
+- =-= for standard lists
+- =+= for additions or inclusions  
+- =*= for notes or highlights
+
+* List Marker Rules
+
+1. *Position*: List markers are only recognized at the start of a line (after indentation)
+2. *Space Required*: A space or tab must follow the marker character
+3. *Keys Can Use Markers*: Keys can start with marker characters without triggering list behavior
+
+#+BEGIN_SRC kvl
+#= kvl 1.0 -
+# Valid list item
+- item
+
+# Not a list item (no space)
+-item = value
+
+# Key starting with dash
+-my-key = value
+#+END_SRC
+
+* Basic Lists
+
+List items under a key are collected into an array:
+
+#+BEGIN_SRC kvl
+#= kvl 1.0 -
+fruits =
+- apple
+- banana
+- cherry
+#+END_SRC
+
+Result: ~{"fruits": ["apple", "banana", "cherry"]}~
+
+* Anonymous Lists in Nested Contexts
+
+When list items appear in a nested context without a preceding key, they form an anonymous list that becomes the direct value of the parent key:
+
+#+BEGIN_SRC kvl
+#= kvl 1.0 -
+items =
+  - item1
+  - item2
+#+END_SRC
+
+Result: ~{"items": ["item1", "item2"]}~
+
+* Nested List Structures
+
+List items can contain key-value pairs, creating nested structures:
+
+#+BEGIN_SRC kvl
+#= kvl 1.0 -
+object =
+  - list1 =
+    - item1
+    - item2
+  - list2 =
+    - item3
+    - item4
+#+END_SRC
+
+Result:
+#+BEGIN_SRC json
+{
+  "object": [
+    {"list1": ["item1", "item2"]},
+    {"list2": ["item3", "item4"]}
+  ]
+}
+#+END_SRC
+
+* Recursive Parsing
+
+KVL follows CCL's design where multiline values are recursively parsed as KVL content. This enables nested structures but means that indented content under a key is always parsed as KVL, not as raw strings.
+
+* Comparison with CCL
+
+CCL uses empty keys for list items:
+#+BEGIN_SRC kvl
+ports =
+  = 8080
+  = 8081
+#+END_SRC
+
+KVL's list markers provide a more intuitive syntax:
+#+BEGIN_SRC kvl
+#= kvl 1.0 -
+ports =
+- 8080
+- 8081
+#+END_SRC
+
+* Current Limitations
+
+1. List items with multiple key-value pairs at the same level require explicit nesting
+2. List markers in multiline string values will be processed if they appear at line start
+3. Mixed indentation with list items can produce unexpected results
+
+* Implementation Status
+
+- Python (py): ✅ Fully implemented with header parsing, list markers, anonymous lists, and comprehensive test coverage (88 tests passing)
+- Go (go): ⚠️ Basic implementation, validation in progress
+- Zig (zig): ⚠️ List markers parsed from headers but anonymous lists not yet implemented
+- JavaScript (js): ❌ Not yet implemented

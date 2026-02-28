@@ -1,0 +1,160 @@
+#+TITLE: KVL Conformance Test Harness
+#+OPTIONS: toc:2
+
+* Overview
+
+This directory contains the cross-implementation conformance test harness for KVL.
+It runs all available implementations against the shared fixtures and compares
+their output against expected results.
+
+* Running the Tests
+
+** Basic Usage
+
+#+begin_src shell
+cd /home/shcv/projects/kvl/conformance
+python run.py
+#+end_src
+
+** Command Line Options
+
+| Option           | Description                                      |
+|------------------+--------------------------------------------------|
+| =-v, --verbose=  | Show detailed output including diffs             |
+| =--impl <name>=  | Test only specific implementation(s)             |
+| =--no-color=     | Disable colored output                           |
+| =--list-impls=   | List available implementations and exit          |
+| =--fixture <n>=  | Run only a specific fixture (name without .kvl)  |
+
+** Examples
+
+Test only the Python implementation:
+#+begin_src shell
+python run.py --impl python
+#+end_src
+
+Test multiple implementations:
+#+begin_src shell
+python run.py --impl python --impl python-cli
+#+end_src
+
+Run a specific fixture with verbose output:
+#+begin_src shell
+python run.py --fixture simple -v
+#+end_src
+
+List available implementations:
+#+begin_src shell
+python run.py --list-impls
+#+end_src
+
+* Fixtures
+
+Fixtures are stored in =../fixtures/valid/= and consist of pairs:
+- =<name>.kvl= - The KVL input file
+- =<name>.expected.json= - The expected JSON output
+
+** Adding New Fixtures
+
+1. Create a new =.kvl= file in =../fixtures/valid/=
+2. Create a corresponding =.expected.json= file with the expected parse result
+3. Run the conformance tests to verify
+
+** Fixture Format
+
+*** KVL File
+Standard KVL syntax:
+#+begin_src kvl
+/= This is a comment
+name = John Doe
+age = 30
+server =
+    host = localhost
+    port = 8080
+#+end_src
+
+*** Expected JSON File
+The expected JSON output from parsing. Note:
+- All values are strings (type inference is application-layer)
+- Comments (=/= text=) are preserved under the ="/"= key as arrays
+- Repeated keys create arrays (compacted form)
+
+#+begin_src json
+{
+  "/": [
+    "This is a comment"
+  ],
+  "name": "John Doe",
+  "age": "30",
+  "server": {
+    "host": "localhost",
+    "port": "8080"
+  }
+}
+#+end_src
+
+* Available Implementations
+
+| Name        | Status  | Notes                                    |
+|-------------+---------+------------------------------------------|
+| python      | Working | Direct library import                    |
+| python-cli  | Working | Python CLI via subprocess                |
+| go          | Working | Go CLI (=kvl parse <file>=)              |
+| zig         | Working | Zig CLI (=kvl-demo parse-json <file>=)   |
+| javascript  | Working | JavaScript CLI (=node cli.js parse <file>=) |
+
+* Implementation Status
+
+** Python (Working)
+
+The Python implementation fully supports conformance testing via both:
+- Direct library import (=kvl.loads()=)
+- CLI (=python -m kvl convert <file>=)
+
+** Go (Working)
+
+The Go implementation supports conformance testing via CLI:
+- =go/kvl parse <file>= outputs compacted JSON to stdout
+- Build with =cd go && go build ./cmd/kvl=
+
+** Zig (Working)
+
+The Zig implementation supports conformance testing via CLI:
+- =zig/zig-out/bin/kvl-demo parse-json <file>= outputs compacted JSON to stdout
+- Build with =cd zig && zig build=
+
+** JavaScript (Working)
+
+The JavaScript implementation supports conformance testing via CLI:
+- =node javascript/src/cli.js parse <file>= outputs compacted JSON to stdout
+
+* Exit Codes
+
+| Code | Meaning                    |
+|------+----------------------------|
+| 0    | All tests passed or skipped |
+| 1    | One or more tests failed   |
+
+* Troubleshooting
+
+** "No fixtures found"
+
+Ensure the fixtures directory exists and contains =.kvl= files:
+#+begin_src shell
+ls ../fixtures/valid/*.kvl
+#+end_src
+
+** Python import errors
+
+Ensure the Python implementation is installed or accessible:
+#+begin_src shell
+cd ../python && pip install -e .
+#+end_src
+
+** Go/Zig build failures
+
+Ensure Go and Zig toolchains are installed, then build:
+#+begin_src shell
+cd ../go && go build ./cmd/kvl
+cd ../zig && zig build
+#+end_src

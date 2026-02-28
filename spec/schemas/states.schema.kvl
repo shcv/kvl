@@ -1,0 +1,49 @@
+#= kvl 1.0 schema open optional
+
+/= Schema for US states demographic data
+/= This open schema allows any state names as keys and validates
+/= their demographic fields wherever they appear
+
+/= Basic demographic fields (apply to any key with these names)
+population = int
+capital = string
+median_income = int
+
+/= Racial/ethnic demographic percentages (0-100)
+white = 
+    type = float
+    min = 0.0
+    max = 100.0
+
+black = 
+    type = float
+    min = 0.0
+    max = 100.0
+
+hispanic = 
+    type = float
+    min = 0.0
+    max = 100.0
+
+asian = 
+    type = float
+    min = 0.0
+    max = 100.0
+
+native_american = 
+    type = float
+    min = 0.0
+    max = 100.0
+
+native_hawaiian = 
+    type = float
+    min = 0.0
+    max = 100.0
+
+/= Population density (people per square mile)
+density_per_sq_mile = 
+    type = float
+    min = 0.0
+
+/= This schema is open, so additional fields like "founded", "nickname", 
+/= "state_bird", etc. will be passed through without validation

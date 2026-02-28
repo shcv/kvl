@@ -1,0 +1,651 @@
+#+TITLE: KVL Implementation Guide
+#+SUBTITLE: Best Practices and Advanced Implementation Topics
+
+* Overview
+
+This guide provides practical guidance for implementing KVL parsers, serializers, and tooling across different programming languages and platforms.
+
+* API Design
+
+** Two-Layer Architecture
+
+Implementations should expose both low-level and high-level APIs:
+
+*** Low-Level API (Categorical)
+
+Returns the raw categorical model with all repeated keys as nested structures:
+
+#+begin_src python
+# Python example
+data = kvl.parse(text)
+# Result: {'tags': {'web': {}, 'api': {}, 'production': {}}}
+#+end_src
+
+#+begin_src go
+// Go example
+data, err := kvl.ParseCategorical(text)
+// Result: map[string]any{"tags": map[string]any{"web": map[string]any{}, ...}}
+#+end_src
+
+*Use cases:*
+- Advanced merge operations
+- Schema-driven transformations
+- Direct access to mathematical structure
+- Custom compaction strategies
+
+*** High-Level API (Compacted)
+
+Automatically converts categorical structures to lists and performs type inference:
+
+#+begin_src python
+# Python example
+data = kvl.loads(text)
+# Result: {'tags': ['web', 'api', 'production']}
+#+end_src
+
+#+begin_src go
+// Go example
+data, err := kvl.Unmarshal(text)
+// Result: map[string]any{"tags": []string{"web", "api", "production"}}
+#+end_src
+
+*Use cases:*
+- Application configuration
+- User-facing data loading
+- Standard serialization/deserialization
+
+** API Naming Conventions
+
+Follow established patterns from JSON libraries:
+
+| Operation | Low-Level (Categorical) | High-Level (Compacted) |
+|-----------+-------------------------+------------------------|
+| Parse string | =parse(text)= | =loads(text)= |
+| Parse file | =parse_file(path)= | =load(path)= |
+| Serialize string | =serialize(data)= | =dumps(data)= |
+| Serialize file | =serialize_file(data, path)= | =dump(data, path)= |
+
+*Language-specific adaptations:*
+- *Python:* =loads()= / =load()= / =dumps()= / =dump()= (JSON-like)
+- *Go:* =Unmarshal()= / =Marshal()= (encoding/json-like)
+- *Rust:* =from_str()= / =to_string()= (serde-like)
+- *JavaScript:* =parse()= / =stringify()= (JSON-like)
+
+* Parser Implementation
+
+** Header Parsing
+
+Parse headers to extract configuration before processing content:
+
+#+begin_src python
+def parse_header(text: str) -> Optional[KvlConfig]:
+    """Extract KVL configuration from header line."""
+    lines = text.splitlines()
+    if not lines or not lines[0].startswith('#'):
+        return None
+
+    header = lines[0]
+    # Extract separator (character after #)
+    separator = header[1]
+
+    # Parse: #<sep> kvl <version> <list-markers> <options>
+    parts = header[2:].split()
+    if not parts or parts[0] != 'kvl':
+        return None
+
+    version = parts[1] if len(parts) > 1 else "1.0"
+
+    # Extract list markers (non-space characters before options)
+    list_markers = ""
+    options = {}
+    for i in range(2, len(parts)):
+        part = parts[i]
+        if '=' in part:
+            # It's an option
+            key, value = part.split('=', 1)
+            options[key] = parse_value(value)
+        else:
+            # It's list markers
+            list_markers += part
+
+    return KvlConfig(separator=separator, version=version,
+                     list_markers=list_markers, options=options)
+#+end_src
+
+** List Marker Recognition
+
+Check for list markers at the beginning of indented lines:
+
+#+begin_src python
+def is_list_marker(line: str, pos: int, config: KvlConfig) -> bool:
+    """Check if position contains a valid list marker."""
+    if not config.list_markers or pos >= len(line):
+        return False
+
+    char = line[pos]
+    if char not in config.list_markers:
+        return False
+
+    # Must be followed by exactly one space or tab
+    if pos + 1 >= len(line):
+        return False
+
+    return line[pos + 1] in ' \t'
+
+def parse_line(line: str, config: KvlConfig) -> tuple:
+    """Parse a single line, handling list markers."""
+    stripped = line.lstrip()
+    indent = len(line) - len(stripped)
+
+    # Check for list marker
+    if stripped and is_list_marker(line, indent, config):
+        # Transform "- value" to ": value" (empty key)
+        value = stripped[2:].lstrip()  # Skip marker and following space
+        return (indent, "", value)
+
+    # Normal key-value parsing
+    sep_pos = find_unescaped_separator(stripped, config.separator)
+    if sep_pos == -1:
+        return (indent, stripped, "")
+
+    key = stripped[:sep_pos].strip()
+    value = stripped[sep_pos + len(config.separator):].strip()
+    return (indent, key, value)
+#+end_src
+
+** Escape Sequence Handling
+
+Find separators that aren't escaped with backslashes:
+
+#+begin_src python
+def find_unescaped_separator(text: str, separator: str) -> int:
+    """Find first occurrence of separator not preceded by backslash."""
+    pos = 0
+    while pos < len(text):
+        sep_pos = text.find(separator, pos)
+        if sep_pos == -1:
+            return -1
+
+        # Check if preceded by backslash
+        if sep_pos > 0 and text[sep_pos - 1] == '\\':
+            # Count consecutive backslashes
+            num_backslashes = 0
+            i = sep_pos - 1
+            while i >= 0 and text[i] == '\\':
+                num_backslashes += 1
+                i -= 1
+
+            # Odd number of backslashes means separator is escaped
+            if num_backslashes % 2 == 1:
+                pos = sep_pos + 1
+                continue
+
+        return sep_pos
+
+    return -1
+
+def unescape_text(text: str, separator: str) -> str:
+    """Remove escape sequences: \\<sep> → <sep>."""
+    escaped = '\\' + separator
+    return text.replace(escaped, separator)
+#+end_src
+
+** Comment Handling
+
+Parse comment lines (=/==) as regular keys:
+
+#+begin_src python
+def parse_line(line: str, config: KvlConfig) -> tuple:
+    """Parse line, treating /= as a regular key."""
+    stripped = line.lstrip()
+    indent = len(line) - len(stripped)
+
+    # /= is just another key, no special handling needed
+    sep_pos = find_unescaped_separator(stripped, config.separator)
+    if sep_pos == -1:
+        # No separator - whole line is a key with empty value
+        return (indent, stripped, "")
+
+    key = stripped[:sep_pos].strip()
+    value = stripped[sep_pos + len(config.separator):].strip()
+    return (indent, key, value)
+#+end_src
+
+Comments can be filtered at the schema level or by user code if needed.
+
+* Serializer Implementation
+
+** Header Generation
+
+Generate appropriate header based on content:
+
+#+begin_src python
+def generate_header(config: KvlConfig) -> str:
+    """Generate KVL header line."""
+    parts = [f"#{config.separator}", "kvl", config.version]
+
+    # Add list markers if present
+    if config.list_markers:
+        parts.append(config.list_markers)
+
+    # Add options
+    for key, value in sorted(config.options.items()):
+        parts.append(f"{key}={value}")
+
+    return " ".join(parts)
+#+end_src
+
+** List Detection and Serialization
+
+Detect list-like structures and choose appropriate serialization:
+
+#+begin_src python
+def serialize_value(key: str, value: Any, indent: int, config: KvlConfig) -> str:
+    """Serialize a value, using list markers for list-like structures."""
+    if isinstance(value, list):
+        # Use list markers if configured
+        if config.list_markers:
+            marker = config.list_markers[0]  # Use first marker
+            lines = [f"{key}{config.separator}"]
+            for item in value:
+                item_line = " " * (indent + 2) + marker + " " + str(item)
+                lines.append(item_line)
+            return "\n".join(lines)
+        else:
+            # Use repeated keys
+            lines = []
+            for item in value:
+                lines.append(f"{key}{config.separator} {item}")
+            return "\n".join(lines)
+
+    elif isinstance(value, dict):
+        # Check if it's a categorical structure (all empty values)
+        if all(v == {} for v in value.values()):
+            # Serialize as list
+            if config.list_markers:
+                marker = config.list_markers[0]
+                lines = [f"{key}{config.separator}"]
+                for subkey in value.keys():
+                    lines.append(" " * (indent + 2) + marker + " " + subkey)
+                return "\n".join(lines)
+            else:
+                # Use empty keys
+                lines = [f"{key}{config.separator}"]
+                for subkey in value.keys():
+                    lines.append(" " * (indent + 2) + config.separator + " " + subkey)
+                return "\n".join(lines)
+        else:
+            # Regular nested object
+            lines = [f"{key}{config.separator}"]
+            for subkey, subvalue in value.items():
+                sublines = serialize_value(subkey, subvalue, indent + 2, config)
+                lines.append(" " * (indent + 2) + sublines)
+            return "\n".join(lines)
+
+    else:
+        # Simple value
+        return f"{key}{config.separator} {value}"
+#+end_src
+
+** Escape Insertion
+
+Escape separators in keys and values:
+
+#+begin_src python
+def escape_text(text: str, separator: str) -> str:
+    """Escape separator characters with backslash."""
+    return text.replace(separator, '\\' + separator)
+
+def serialize_pair(key: str, value: str, config: KvlConfig) -> str:
+    """Serialize key-value pair with escaping."""
+    escaped_key = escape_text(key, config.separator)
+    escaped_value = escape_text(value, config.separator)
+    return f"{escaped_key}{config.separator} {escaped_value}"
+#+end_src
+
+* Merge Implementation
+
+Implement associative merge following the specification:
+
+#+begin_src python
+def merge(a: Any, b: Any) -> Any:
+    """Merge two KVL data structures associatively."""
+    # Simple value override
+    if not isinstance(b, dict):
+        return b
+    if not isinstance(a, dict):
+        return b
+
+    # Both are dicts - recursive merge
+    result = a.copy()
+    for key, value in b.items():
+        if key in result:
+            result[key] = merge(result[key], value)
+        else:
+            result[key] = value
+
+    return result
+#+end_src
+
+* Compaction Implementation
+
+Convert categorical structures to lists:
+
+#+begin_src python
+def compact(data: Any, config: KvlConfig) -> Any:
+    """Convert categorical structures to lists recursively."""
+    if isinstance(data, list):
+        return [compact(item, config) for item in data]
+
+    elif isinstance(data, dict):
+        # Check if this is a categorical structure (all empty dict values)
+        if data and all(isinstance(v, dict) and not v for v in data.values()):
+            # Convert to list
+            return list(data.keys())
+        else:
+            # Recursively compact nested structures
+            return {k: compact(v, config) for k, v in data.items()}
+
+    else:
+        return data
+#+end_src
+
+* Language-Specific Considerations
+
+** Python
+
+- Use =dict= for objects, =list= for arrays
+- Follow JSON API patterns (=loads=, =dumps=)
+- Type hints for better IDE support
+- Support both file paths and file-like objects
+
+** Go
+
+- Define =Config= struct for type safety
+- Use =encoding/json=-like API (=Unmarshal=, =Marshal=)
+- Support both categorical and compacted via different functions
+- Leverage Go's =interface{}= for dynamic data
+
+** Rust
+
+- Use =serde= patterns for serialization
+- =HashMap= for objects, =Vec= for arrays
+- Strong typing with =enum= for value types
+- Zero-copy parsing where possible
+
+** JavaScript/TypeScript
+
+- Follow JSON API patterns
+- TypeScript interfaces for configuration types
+- Support both Node.js and browser environments
+- Consider async APIs for large files
+
+** Zig
+
+- Manual memory management for parsed structures
+- Arena allocators for temporary parsing data
+- Strong typing with =union= for value types
+- Comptime configuration where applicable
+
+* Testing Strategies
+
+** Property-Based Testing
+
+Test mathematical properties:
+
+#+begin_src python
+import hypothesis.strategies as st
+
+@given(st.text(), st.text(), st.text())
+def test_merge_associativity(a, b, c):
+    """Merge operation must be associative."""
+    left = merge(merge(a, b), c)
+    right = merge(a, merge(b, c))
+    assert left == right
+
+@given(st.text())
+def test_right_identity(a):
+    """Empty config is right identity."""
+    assert merge(a, {}) == a
+#+end_src
+
+** Round-Trip Testing
+
+Ensure parse → serialize → parse produces equivalent results:
+
+#+begin_src python
+def test_round_trip(original_text: str):
+    """Test that serialization preserves semantics."""
+    data1 = loads(original_text)
+    serialized = dumps(data1)
+    data2 = loads(serialized)
+    assert data1 == data2
+#+end_src
+
+** Escaping Tests
+
+Test various escaping scenarios:
+
+#+begin_src python
+def test_escaping():
+    tests = [
+        ("url = https\\://example.com", {"url": "https://example.com"}),
+        ("equation = x\\=y", {"equation": "x=y"}),
+        ("value = a\\\\=b", {"value": "a\\=b"}),
+        ("value = a\\\\\\=b", {"value": "a\\\\=b"}),
+    ]
+    for kvl_text, expected in tests:
+        assert loads(kvl_text) == expected
+#+end_src
+
+* Performance Optimization
+
+** Streaming Parsing
+
+For large files, consider streaming approaches:
+
+#+begin_src python
+def parse_stream(lines: Iterator[str], config: KvlConfig):
+    """Parse KVL line-by-line without loading entire file."""
+    stack = []  # Track nesting levels
+    for line in lines:
+        indent, key, value = parse_line(line, config)
+        # Process based on indent level
+        # ...
+#+end_src
+
+** Lazy Compaction
+
+Defer compaction until explicitly requested:
+
+#+begin_src python
+class LazyKvlData:
+    """Wrapper that delays compaction."""
+    def __init__(self, categorical_data):
+        self._data = categorical_data
+        self._compacted = None
+
+    def as_compacted(self):
+        if self._compacted is None:
+            self._compacted = compact(self._data)
+        return self._compacted
+#+end_src
+
+** Efficient Set Operations
+
+Use set-based data structures for categorical merges:
+
+#+begin_src python
+from collections import defaultdict
+
+def merge_categorical_efficient(a: dict, b: dict) -> dict:
+    """Efficient categorical merge using set operations."""
+    result = defaultdict(dict)
+    for key in set(a.keys()) | set(b.keys()):
+        if key in a and key in b:
+            result[key] = merge(a[key], b[key])
+        elif key in a:
+            result[key] = a[key]
+        else:
+            result[key] = b[key]
+    return dict(result)
+#+end_src
+
+* Error Handling Best Practices
+
+** Informative Error Messages
+
+Include context in error messages:
+
+#+begin_src python
+raise KvlParseError(
+    f"Invalid list marker at line {line_num}: "
+    f"expected space after '{marker}', got '{line[pos+1]}'"
+)
+#+end_src
+
+** Error Types
+
+Define specific exception types:
+
+#+begin_src python
+class KvlError(Exception):
+    """Base exception for KVL errors."""
+    pass
+
+class KvlParseError(KvlError):
+    """Raised when parsing fails."""
+    def __init__(self, message, line=None, column=None):
+        super().__init__(message)
+        self.line = line
+        self.column = column
+
+class KvlSerializeError(KvlError):
+    """Raised when serialization fails."""
+    pass
+
+class KvlValidationError(KvlError):
+    """Raised when schema validation fails."""
+    pass
+#+end_src
+
+* Security Considerations
+
+** Input Size Limits
+
+Prevent DoS attacks with size limits:
+
+#+begin_src python
+MAX_INPUT_SIZE = 10 * 1024 * 1024  # 10MB
+MAX_RECURSION_DEPTH = 100
+
+def parse(text: str) -> dict:
+    if len(text) > MAX_INPUT_SIZE:
+        raise KvlParseError(f"Input exceeds {MAX_INPUT_SIZE} bytes")
+    # ...
+#+end_src
+
+** Recursion Depth Limits
+
+Prevent stack overflow from deeply nested structures:
+
+#+begin_src python
+def parse_nested(text: str, depth: int = 0) -> dict:
+    if depth > MAX_RECURSION_DEPTH:
+        raise KvlParseError(f"Nesting depth exceeds {MAX_RECURSION_DEPTH}")
+    # ...
+#+end_src
+
+* Schema Integration
+
+Provide schema validation as an optional layer:
+
+#+begin_src python
+class Schema:
+    """Schema for validating and transforming KVL data."""
+
+    def validate(self, data: dict) -> bool:
+        """Validate data against schema."""
+        # ...
+
+    def deserialize(self, data: dict) -> dict:
+        """Validate and convert types."""
+        # ...
+
+    def loads(self, text: str) -> dict:
+        """Parse and validate KVL text."""
+        data = kvl.loads(text)
+        return self.deserialize(data)
+#+end_src
+
+* Tooling Support
+
+** Syntax Highlighting
+
+Provide language definitions for common editors:
+
+- VSCode: TextMate grammar
+- Emacs: major mode
+- Vim: syntax file
+- Sublime Text: syntax definition
+
+** CLI Tools
+
+Implement command-line utilities:
+
+#+begin_example
+kvl format file.kvl              # Format KVL file
+kvl validate file.kvl schema.kvl # Validate against schema
+kvl merge base.kvl override.kvl  # Merge configurations
+kvl convert --to=json file.kvl   # Convert to other formats
+#+end_example
+
+** Language Server Protocol (LSP)
+
+Consider LSP server for IDE integration:
+
+- Syntax error detection
+- Schema-based completion
+- Hover documentation
+- Go-to-definition for schema references
+
+* Migration Path
+
+** From JSON/YAML
+
+Provide conversion tools:
+
+#+begin_src python
+def from_json(json_text: str) -> str:
+    """Convert JSON to KVL."""
+    data = json.loads(json_text)
+    return dumps(data)
+
+def from_yaml(yaml_text: str) -> str:
+    """Convert YAML to KVL."""
+    data = yaml.safe_load(yaml_text)
+    return dumps(data)
+#+end_src
+
+** Backward Compatibility
+
+Support older KVL versions if specification evolves:
+
+#+begin_src python
+def parse_with_version(text: str) -> dict:
+    """Parse KVL, handling version differences."""
+    config = parse_header(text)
+    if config and config.version == "1.0":
+        return parse_v1(text, config)
+    elif config and config.version == "2.0":
+        return parse_v2(text, config)
+    else:
+        return parse_latest(text, config)
+#+end_src
+
+* Further Resources
+
+- [[./language-specification.org][KVL Language Specification]]
+- [[./mathematical-properties.org][Mathematical Properties Guide]]
+- [[./schema-guide.org][Schema System Guide]]
+- Reference implementations: py, go, zig

@@ -1,0 +1,10 @@
+{
+  "high": [
+    "critical-bug",
+    "security-fix"
+  ],
+  "low": [
+    "nice-to-have",
+    "refactor"
+  ]
+}

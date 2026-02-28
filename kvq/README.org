@@ -1,0 +1,217 @@
+#+TITLE: kvq - KVL Query Tool
+#+AUTHOR: KVL Team
+#+DATE: 2025-01-20
+
+* Overview
+
+kvq is a command-line query tool for KVL (Key-Value Language) files, similar to =jq= for JSON. It provides powerful query capabilities with Unix-friendly output formats.
+
+* Features
+
+** Query Syntax
+- Dot notation for nested access: =server.port=
+- Array indexing: =tags[0]=, =tags[1:3]=
+- Array iteration: =tags[]=, =servers[].host=
+- Pipe functions: =tags[] | length=, =scores | max=
+
+** Output Formats
+- Raw text (one-per-line for Unix tools)
+- JSON (compact or pretty-printed)
+- KVL format
+- Automatic format detection
+
+** Unix Integration
+- Standard input/output support
+- Exit codes for error handling
+- Multiple file merging
+- Pipeline-friendly output
+
+* Installation
+
+#+BEGIN_SRC bash
+# From releases (recommended)
+curl -L https://github.com/shcv/kvl/releases/latest/download/kvq-linux-x86_64 -o kvq
+chmod +x kvq
+
+# From source (requires Zig)
+git clone https://github.com/shcv/kvl
+cd kvq
+zig build -Doptimize=ReleaseFast
+#+END_SRC
+
+* Usage Examples
+
+** Basic Queries
+#+BEGIN_SRC bash
+# Get a simple value
+kvq config.kvl server.host
+# → localhost
+
+# Get an array
+kvq config.kvl tags[]
+# → web
+# → api
+# → production
+
+# Get array element
+kvq config.kvl tags[0]
+# → web
+#+END_SRC
+
+** Advanced Queries
+#+BEGIN_SRC bash
+# Query all server ports
+kvq config.kvl servers[].port
+
+# Get array length
+kvq config.kvl tags[] | length
+
+# Find maximum score
+kvq config.kvl scores | max
+
+# Multiple queries
+kvq config.kvl -- server.host server.port
+#+END_SRC
+
+** Output Formats
+#+BEGIN_SRC bash
+# JSON output
+kvq --json config.kvl server
+# {"host": "localhost", "port": "8080"}
+
+# KVL output
+kvq --kvl config.kvl server
+# host = localhost
+# port = 8080
+
+# Raw output (no quotes)
+kvq --raw config.kvl server.host
+# localhost
+#+END_SRC
+
+** Multiple Files
+#+BEGIN_SRC bash
+# Merge and query multiple files
+kvq base.kvl override.kvl server.port
+
+# Read from stdin
+cat config.kvl | kvq server.host
+#+END_SRC
+
+* Command Line Interface
+
+#+BEGIN_SRC
+kvq [options] [file [file ..]] <query>
+kvq [options] [file [file ..]] -- [query [query ..]]
+
+Options:
+  -r, --raw            Raw output (no quotes on strings)
+  -c, --compact        Compact output (single line)
+  --json               Force JSON output format
+  --kvl                Force KVL output format
+  --help               Show help message
+
+Arguments:
+  file                 KVL file to query (default: stdin)
+  query                Query expression to execute
+#+END_SRC
+
+* Query Language Reference
+
+** Path Navigation
+| Syntax | Description | Example |
+|--------|-------------|---------|
+| =key= | Access key | =server= |
+| =key.subkey= | Nested access | =server.host= |
+| =key[n]= | Array index | =tags[0]= |
+| =key[n:m]= | Array slice | =tags[1:3]= |
+| =key[]= | Array iteration | =tags[]= |
+
+** Pipe Functions
+| Function | Description | Example |
+|----------|-------------|---------|
+| =length= | Get length | =tags[] \| length= |
+| =keys= | Get object keys | =server \| keys= |
+| =min= | Minimum value | =scores \| min= |
+| =max= | Maximum value | =scores \| max= |
+| =sum= | Sum values | =scores \| sum= |
+
+** Array Operations
+Array operations work with both Python-style lists and KVL categorical structures:
+
+#+BEGIN_SRC kvl
+# KVL categorical format
+tags = web
+tags = api
+tags = production
+
+# Equivalent to: {"tags": ["web", "api", "production"]}
+#+END_SRC
+
+* Implementation Status
+
+** Planned Implementation: Zig
+- *Performance*: Native compiled binary
+- *Distribution*: Single executable, no dependencies
+- *Integration*: Shares parsing logic with kvl (Zig)
+- *Platform Support*: Linux, macOS, Windows
+
+** Previous Python Implementation
+The original Python implementation (480 lines) provided the feature specification and has been extracted from the kvl (Python) library to maintain separation of concerns.
+
+* Architecture
+
+** Parser Integration
+kvq will integrate with the kvl (Zig) parser for:
+- Consistent KVL parsing behavior
+- Shared configuration handling
+- Common error reporting
+- Header processing (separators, list markers)
+
+** Query Engine
+- Recursive descent query parser
+- Type-safe query execution
+- Memory-efficient streaming for large files
+- Error propagation with helpful messages
+
+** Output Formatting
+- Pluggable output formatters
+- UTF-8 string handling
+- Numeric type preservation
+- Unix-friendly defaults
+
+* Development
+
+** Building from Source
+#+BEGIN_SRC bash
+git clone https://github.com/shcv/kvl
+cd kvl/kvq
+zig build
+#+END_SRC
+
+** Testing
+#+BEGIN_SRC bash
+# Run all tests
+zig build test
+
+# Run integration tests
+zig build test-integration
+
+# Benchmark performance
+zig build benchmark
+#+END_SRC
+
+** Contributing
+See [[file:CONTRIBUTING.org][CONTRIBUTING.org]] for development guidelines and code style requirements.
+
+* Related Projects
+
+- [[https://github.com/shcv/kvl/tree/main/spec][KVL Language Specification]]
+- [[https://github.com/shcv/kvl/tree/main/python][kvl (Python)]]
+- [[https://github.com/shcv/kvl/tree/main/go][kvl (Go)]]
+- [[https://github.com/shcv/kvl/tree/main/zig][kvl (Zig)]]
+- [[https://jqlang.github.io/jq/][jq - JSON Query Tool]] (inspiration)
+
+* License
+
+CC0 1.0 Universal - Public Domain Dedication

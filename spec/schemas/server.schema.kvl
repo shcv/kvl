@@ -1,0 +1,70 @@
+#= kvl 1.0 schema closed required
+
+/= Schema for server configuration with strict validation
+/= This closed schema requires all fields to match defined specifications
+/= Required=true means fields in matched subschemas must be present
+
+/= Global field specifications  
+host = 
+    type = string
+    min-length = 1
+
+timeout = 
+    type = int
+    min = 1
+    max = 300
+
+/= Server-specific configuration
+server = 
+    name = 
+        type = string
+        required = true
+        max-length = 50
+
+    port = 
+        type = int
+        min = 8000
+        max = 9000
+        required = true
+
+    ssl = 
+        type = bool
+        required = false
+
+    workers = 
+        type = int
+        min = 1
+        max = 32
+        required = false
+
+/= Database-specific configuration  
+database = 
+    host = 
+        type = string
+        required = true
+
+    port = 
+        type = int
+        enum = 3306,5432,6379
+        required = true
+
+    name = 
+        type = string
+        pattern = ^[a-zA-Z][a-zA-Z0-9_]*$
+        required = true
+
+    ssl = 
+        type = bool
+        required = false
+
+/= Monitoring configuration
+monitoring = 
+    enabled = 
+        type = bool
+        required = true
+
+    interval = 
+        type = int
+        min = 5
+        max = 3600
+        required = false

@@ -1,0 +1,57 @@
+/= KVL merge operations examples
+/= These examples demonstrate how KVL configurations merge
+
+/= Base configuration (file A)
+server = 
+    host = localhost
+    port = 8080
+    timeout = 30
+
+database = 
+    host = db-server
+    port = 5432
+
+tags = web
+tags = api
+
+/= Override configuration (file B) 
+/= When merged with base, produces the result below
+server = 
+    port = 9000        /= Overrides base port
+    ssl = true         /= Adds new field
+    retries = 3        /= Adds new field
+
+database = 
+    name = myapp_db    /= Adds new field
+    /= host and port inherited from base
+
+tags = production      /= Adds to categorical structure
+tags = monitoring      /= Adds to categorical structure
+
+cache = 
+    host = redis-server    /= New top-level section
+    port = 6379
+
+/= Merge result (A + B):
+/= server = 
+/=     host = localhost     (from A)
+/=     port = 9000          (B overrides A)
+/=     timeout = 30         (from A)
+/=     ssl = true           (from B)  
+/=     retries = 3          (from B)
+/=
+/= database = 
+/=     host = db-server     (from A)
+/=     port = 5432          (from A)
+/=     name = myapp_db      (from B)
+/=
+/= tags = {
+/=     web = {},            (from A)
+/=     api = {},            (from A)
+/=     production = {},     (from B)
+/=     monitoring = {}      (from B)
+/= }
+/=
+/= cache = 
+/=     host = redis-server  (from B)
+/=     port = 6379          (from B)

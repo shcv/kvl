@@ -1,0 +1,224 @@
+#+TITLE: Getting Started with KVL
+
+* Introduction
+
+Key-Value Language (KVL) is a minimalist configuration format that combines mathematical elegance with practical usability.
+If you're familiar with YAML or TOML, you'll find KVL refreshingly simple yet powerful.
+
+* Installation
+
+** From PyPI
+
+#+BEGIN_SRC bash
+pip install kvl
+#+END_SRC
+
+** From Source
+
+#+BEGIN_SRC bash
+git clone https://github.com/shcv/kvl.git
+cd kvl/python
+pip install -e .
+#+END_SRC
+
+* Your First KVL File
+
+Create a file called ~config.kvl~:
+
+#+BEGIN_SRC kvl
+# Application configuration
+name = MyApp
+version = 1.0.0
+
+server =
+  host = localhost
+  port = 8080
+  
+features = auth
+features = logging
+features = metrics
+#+END_SRC
+
+* Basic Usage
+
+** Loading Configuration
+
+#+BEGIN_SRC python
+import kvl
+
+# Load from file
+config = kvl.load("config.kvl")
+
+# Access values
+print(config["name"])           # "MyApp"
+print(config["server"]["host"]) # "localhost"
+
+# Load from string
+data = kvl.loads("debug = true\nport = 8080")
+print(data["debug"])            # "true" (string)
+print(data["port"])             # "8080" (string)
+# Note: loads() does not perform automatic type conversion
+#+END_SRC
+
+** Understanding the Structure
+
+In KVL, everything is a key-value pair. The values are always strings by default, and nested structures are created through indentation:
+
+#+BEGIN_SRC python
+# This KVL:
+# server =
+#   host = localhost
+#   port = 8080
+
+# Becomes this Python dict:
+# {"server": {"host": "localhost", "port": "8080"}}
+#+END_SRC
+
+** Repeated Keys
+
+When you repeat a key, KVL creates a nested structure (not an array):
+
+#+BEGIN_SRC python
+kvl_text = """
+tags = web
+tags = api
+tags = v2
+"""
+
+data = kvl.loads(kvl_text)
+print(data)
+# {"tags": ["web", "api", "v2"]}
+
+# Note: loads() automatically converts repeated keys to lists.
+# To get the raw categorical structure, use parse():
+raw_data = kvl.parse(kvl_text)
+print(raw_data)
+# {"tags": {"web": {}, "api": {}, "v2": {}}}
+#+END_SRC
+
+The `loads()` function provides a convenient Python-friendly format, while `parse()` preserves the mathematical categorical structure.
+
+* Working with Types
+
+By default, all values in KVL are strings. This is intentional for simplicity and predictability. However, KVL provides schemas for type conversion when needed:
+
+#+BEGIN_SRC python
+from kvl import Schema
+
+# Define a schema
+config_schema = Schema({
+    "port": int,
+    "debug": bool,
+    "timeout": float,
+    "features": list  # Special: converts repeated keys to list
+})
+
+# Load with type conversion
+typed_config = config_schema.loads("""
+port = 8080
+debug = true
+timeout = 30.5
+features = auth
+features = logging
+""")
+
+print(typed_config["port"])     # 8080 (int)
+print(typed_config["debug"])    # True (bool)
+print(typed_config["features"]) # ["auth", "logging"] (list)
+#+END_SRC
+
+* Saving Configuration
+
+#+BEGIN_SRC python
+config = {
+    "app": {
+        "name": "MyApp",
+        "version": "2.0.0"
+    },
+    "database": {
+        "host": "localhost",
+        "port": "5432"
+    }
+}
+
+# Save to file
+kvl.dump(config, "output.kvl")
+
+# Convert to string
+kvl_string = kvl.dumps(config)
+print(kvl_string)
+#+END_SRC
+
+* Configurable Separators
+
+KVL supports different separator styles. The separator is auto-detected from file headers:
+
+#+BEGIN_SRC kvl
+#: kvl 1.0
+name: MyApp
+server:
+  host: localhost
+  port: 8080
+#+END_SRC
+
+Anything between the "#" and first space is the separator.
+
+Example separators:
+- ~=~ - Classic style (default)
+- ~:~ - YAML-like (no space before colon)
+- ~->~ - Arrow style
+- ~:=~ - Pascal-like
+
+* Command Line Tools
+
+KVL comes with helpful CLI commands:
+
+#+BEGIN_SRC bash
+# Validate a KVL file
+kvl validate config.kvl
+
+# Format a file (auto-detect style)
+kvl format config.kvl
+
+# Convert between formats
+kvl convert config.kvl config.json
+kvl convert config.json config.kvl
+
+# Merge multiple files
+kvl merge base.kvl dev.kvl local.kvl > final.kvl
+#+END_SRC
+
+* Next Steps
+
+- [[file:language-spec.org][Language Specification]] - Complete syntax reference
+- [[file:schema-guide.org][Schema Guide]] - Type validation and constraints
+- [[file:transform-guide.org][Transform Guide]] - Working with lists and compacting
+- [[file:examples.org][Examples Gallery]] - Real-world usage patterns
+
+* Quick Reference Card
+
+#+BEGIN_SRC kvl
+# Comments start with /= or #
+/= This is a comment
+# This is also a comment (at line start only)
+
+# Simple key-value
+name = value
+
+# Nested structures (indentation)
+parent =
+  child1 = value1
+  child2 = value2
+  
+# Repeated keys (creates nested structure)
+item = first
+item = second
+
+# Empty values
+empty_key =
+
+# Multi-line values (must be indented)
+description =
+  This is a longer value
+  that spans multiple lines
+#+END_SRC

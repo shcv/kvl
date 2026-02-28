@@ -1,0 +1,7 @@
+/= This is a comment at the start
+name = test
+/= Comment between keys
+version = 1.0
+/= Another comment
+active = true
+/= Final comment

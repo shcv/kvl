@@ -1,0 +1,452 @@
+#+TITLE: KVL Schema System Guide
+#+SUBTITLE: Flexible Recursive Field Validation (Optional Feature)
+
+*IMPORTANT: Schemas are an OPTIONAL feature.* KVL implementations are not required to support schemas for conformance with the specification. This guide documents the recommended schema system for implementations that choose to provide validation capabilities.
+
+*Note: This is the language-agnostic schema specification. For implementation-specific API documentation, see individual language repositories.*
+
+* Overview
+
+The KVL Schema system provides flexible, recursive validation of KVL data structures using a field-oriented approach. Unlike traditional object-oriented schemas that require predefined object shapes, KVL schemas allow field specifications to match anywhere in the data hierarchy.
+
+*Implementation Status:*
+- Python (py): Full schema support ✓
+- Zig (zig): Full schema support ✓
+- Go (go): Partial schema support (in progress)
+- JavaScript (js): Not yet implemented
+
+** Core Principles
+
+1. *Field-Oriented Validation* - Field specifications apply based on field names, not object structure
+2. *Recursive Matching* - Schema validation traverses data recursively, checking each key against all root schema keys  
+3. *Root-Based Resolution* - All data keys are checked against the complete set of root schema keys, regardless of nesting level
+4. *Flexible Inheritance* - Any field can match any root specification, providing maximum flexibility
+
+** Key Benefits
+
+- *Handles dynamic keys* - Perfect for categorical data like states, countries, or user-generated content
+- *Reduces duplication* - Define field types once, apply everywhere
+- *Natural scoping* - More specific subschema definitions override general ones
+- *Composable* - Mix and match field definitions for complex validation needs
+
+* Schema Definition Syntax
+
+** Simple Field Specifications
+
+Basic type definitions apply globally to any field with that name:
+
+#+begin_src kvl
+/= Basic type definitions
+population = int
+capital = string
+active = bool
+score = float
+#+end_src
+
+** Complex Field Specifications
+
+Add constraints and validation rules:
+
+#+begin_src kvl
+port = 
+    type = int
+    min = 1
+    max = 65535
+
+name = 
+    type = string
+    max-length = 50
+    pattern = ^[A-Za-z\s]+$
+
+tags = 
+    type = list
+    min-items = 1
+    max-items = 10
+#+end_src
+
+** Nested Field Specifications
+
+Create scoped validation contexts for more specific matching:
+
+#+begin_src kvl
+/= Global default for any 'port' field
+port = int
+
+/= More specific validation when port appears under 'server'
+server =
+    host = string
+    port =
+        type = int
+        min = 8000
+        max = 9000
+
+/= Different validation when port appears under 'database'
+database =
+    host = string
+    port =
+        type = int
+        min = 3306
+        max = 5432
+#+end_src
+
+* Schema Configuration
+
+** Coverage Control (open/closed)
+
+Controls whether unknown fields are allowed:
+
+- *closed* - All leaf values must match some schema specification (strict validation)
+- *open* (default) - Leaf values may exist without schema specifications (pass-through)
+
+** Field Requirement Control (required/optional)
+
+Controls whether fields in matched subschemas must be present:
+
+- *required = false* (default) - Fields in matched subschemas are optional
+- *required = true* - Fields in matched subschemas must be present
+
+** Schema Headers
+
+Configure schema behavior using headers:
+
+#+begin_src kvl
+#= kvl 1.0 schema open optional
+#= kvl 1.0 schema closed required  
+#= kvl 1.0 schema open required
+#+end_src
+
+** Per-Field Required Overrides
+
+Override the schema default for specific fields:
+
+#+begin_src kvl
+#= kvl 1.0 schema open optional
+
+server =
+    host =
+        type = string
+        /= This field must be present
+        required = true
+
+    port =
+        type = int
+        /= This field is optional
+        required = false
+#+end_src
+
+* Validation Algorithm
+
+** Step 1: Root Key Matching
+
+For each key in the data:
+1. Check if key matches ANY root schema key
+2. If match found: apply that schema specification recursively
+3. If no match found: proceed based on coverage setting (open/closed)
+
+** Step 2: Recursive Validation
+
+When a root key matches:
+1. If schema value is a simple type: validate data value against type
+2. If schema value is a constraint spec: validate data value against constraints  
+3. If schema value is a nested object: recursively validate data value contents
+
+** Step 3: Subschema Validation
+
+Within a matched subschema context:
+1. Data keys first checked against subschema specifications
+2. If no subschema match: checked against ALL root schema keys
+3. Most specific match (subschema) takes precedence over general (root)
+
+** Step 4: Required Field Checking
+
+After validating a matched subschema:
+1. Check if all required fields are present
+2. Use per-field =required= settings if specified
+3. Fall back to schema default =required= setting
+
+* Examples
+
+** Example 1: States Data (Open Schema)
+
+Perfect for categorical data with unknown parent keys:
+
+*Schema:*
+#+begin_src kvl
+#= kvl 1.0 schema open optional
+
+population = int
+capital = string
+median_income = int
+white = float
+black = float
+hispanic = float
+#+end_src
+
+*Data:*
+#+begin_src kvl
+Alabama =
+    /= Matches root 'capital = string'
+    capital = Montgomery
+    /= Matches root 'population = int'
+    population = 5224279
+    /= No match, open schema passes through
+    founded = 1819
+
+Texas =
+    /= Matches root 'capital = string'
+    capital = Austin
+    /= No match, open schema passes through
+    nickname = Lone Star
+    /= Matches root 'population = int'
+    population = 30976754
+#+end_src
+
+*Result:* Valid. All matched fields validated, unmatched fields passed through.
+
+** Example 2: Server Configuration (Closed Schema)
+
+Strict validation for known configuration structures:
+
+*Schema:*
+#+begin_src kvl  
+#= kvl 1.0 schema closed optional
+
+timeout = int
+server = 
+    host = string
+    port = int
+
+database = 
+    host = string
+    port = 
+        type = int
+        min = 3306
+        max = 5432
+#+end_src
+
+*Data:*
+#+begin_src kvl
+server =
+    /= Matches server.host
+    host = localhost
+    /= Matches server.port
+    port = 8080
+    /= No match in server subschema, matches root 'timeout'
+    timeout = 30
+#+end_src
+
+*Result:* Valid. All fields match schema specifications.
+
+** Example 3: Required Field Validation
+
+Control which fields must be present:
+
+*Schema:*
+#+begin_src kvl
+#= kvl 1.0 schema open required
+
+server =
+    host =
+        type = string
+        /= Must be present
+        required = true
+
+    port =
+        type = int
+        /= Optional (overrides schema default)
+        required = false
+#+end_src
+
+*Valid Data:*
+#+begin_src kvl
+server =
+    /= Required field present
+    host = localhost
+    /= port omitted but optional
+#+end_src
+
+*Invalid Data:*
+#+begin_src kvl
+server =
+    /= host missing but required - will fail validation
+    port = 8080
+#+end_src
+
+** Example 4: Mixed Scoping
+
+Demonstrate global defaults with specific overrides:
+
+*Schema:*
+#+begin_src kvl
+#= kvl 1.0 schema open optional
+
+/= Global field specifications
+port = int
+host = string
+timeout = int
+
+/= Context-specific overrides
+server =
+    port =
+        type = int
+        /= More restrictive than global
+        min = 8000
+        max = 9000
+
+    ssl = bool
+
+database =
+    port =
+        type = int
+        /= Specific allowed values
+        enum = 3306,5432
+#+end_src
+
+*Data:*
+#+begin_src kvl
+server =
+    /= Matches server.host, falls back to root 'host = string'
+    host = localhost
+    /= Matches server.port, uses server-specific constraints
+    port = 8080
+    /= Matches server.ssl
+    ssl = true
+    /= No match in server, matches root 'timeout = int'
+    timeout = 30
+
+database =
+    /= Matches database.host, falls back to root 'host = string'
+    host = db.local
+    /= Matches database.port, uses database-specific constraints
+    port = 3306
+#+end_src
+
+* Type System
+
+** Supported Types
+
+- =string= / =str= - Text values
+- =integer= / =int= - Whole numbers  
+- =float= / =number= - Decimal numbers
+- =boolean= / =bool= - True/false values
+- =list= / =array= - Collections of items
+- =object= / =dict= - Nested key-value structures
+- =datetime= / =date= - Date and time values
+
+** Type Conversion
+
+Values are automatically converted to the specified type when possible:
+
+- Strings to numbers: ="123"= → =123=
+- Strings to booleans: ="true"=, ="yes"=, ="1"= → =true=
+- KVL categorical structure to lists: ={red = {}, green = {}, blue = {}}= → =["red", "green", "blue"]=
+
+** Constraint Types
+
+*** Numeric Constraints
+- =min= - Minimum value
+- =max= - Maximum value
+
+*** String Constraints  
+- =min-length= - Minimum string length
+- =max-length= - Maximum string length
+- =pattern= - Regular expression pattern
+
+*** List Constraints
+- =min-items= - Minimum number of items
+- =max-items= - Maximum number of items
+
+*** Enumeration Constraints
+- =enum= - Comma-separated list of allowed values
+
+* API Reference
+
+** Schema Class
+
+*** Constructor
+#+begin_src python
+Schema(fields, open=True, required=False)
+#+end_src
+
+- =fields= - Dictionary of field specifications
+- =open= - Allow unmatched fields (default: True)
+- =required= - Fields in matched subschemas must be present (default: False)
+
+*** Methods
+
+**** =validate(data, path="")=
+Validate data against schema without conversion.
+
+**** =deserialize(data, path="")=
+Validate and convert data to typed Python objects.
+
+**** =serialize(data, path="")=
+Convert typed Python objects back to KVL-compatible format.
+
+**** =loads(kvl_text)=
+Parse KVL text and validate against schema.
+
+**** =load(file_or_path)=
+Load KVL file and validate against schema.
+
+**** =dumps(data, **options)=
+Serialize data and convert to KVL text.
+
+**** =dump(data, file_or_path, **options)=
+Serialize data and write to KVL file.
+
+*** Class Methods
+
+**** =Schema.from_kvl(kvl_text)=
+Create schema from KVL schema definition text.
+
+**** =Schema.from_file(file_path)=
+Load schema from .schema.kvl file.
+
+* Error Handling
+
+** Validation Errors
+
+- =KvlValidationError= - Data doesn't match schema structure
+- =KvlTypeError= - Type conversion failed
+- =KvlSchemaError= - Schema definition is invalid
+
+** Error Context
+
+All errors include:
+- *Field path* - Location of the error in the data structure
+- *Expected type/constraint* - What was expected
+- *Actual value* - What was found
+- *Helpful message* - Human-readable description
+
+* Best Practices
+
+** Schema Design
+
+1. *Start with global field specs* - Define common fields at the root level
+2. *Add specific overrides* - Use nested specs only when needed
+3. *Use open schemas* - For flexible, evolving data structures
+4. *Use closed schemas* - For strict, well-defined configurations
+5. *Minimize required fields* - Only require truly essential fields
+
+** Performance Considerations
+
+1. *Simple specs are faster* - Use basic types when possible
+2. *Avoid deep nesting* - Keep schema structure relatively flat
+3. *Cache schema objects* - Reuse schema instances for multiple validations
+4. *Use appropriate coverage* - Closed schemas are faster but less flexible
+
+** Debugging
+
+1. *Enable path tracking* - Error messages show exact field locations
+2. *Test with small data* - Validate schema design with simple examples
+3. *Use schema headers* - Clearly document schema intentions
+4. *Validate schema files* - Ensure schema definitions are correct
+
+* Implementation Examples
+
+See individual language repositories for API-specific examples:
+
+- *Python (py)*: Complete API documentation with examples
+- *Go (go)*: Struct-based validation examples
+- *JavaScript (js)*: TypeScript definition examples (planned)

@@ -1,0 +1,9 @@
+/= Type inference examples
+/= All values are strings, type inference is application-layer
+
+string_value = hello world
+number_int = 42
+number_float = 3.14159
+bool_true = true
+bool_false = false
+quoted = "quoted string"

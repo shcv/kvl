@@ -1,0 +1,731 @@
+#+TITLE: KVL Python API Reference
+
+* Core Functions
+
+** Loading and Parsing
+
+*** kvl.load(file_or_path, config=None)
+
+Load KVL from a file with automatic compacting.
+
+#+BEGIN_SRC python
+Parameters:
+    file_or_path : Union[str, Path, TextIO]
+        File path or file-like object to read from
+    config : Optional[KvlConfig]
+        Configuration options. If None, auto-detects from header.
+
+Returns:
+    Dict[str, Any]
+        Parsed KVL data with automatic compacting of categorical structures
+        to lists (same as loads())
+
+Raises:
+    KvlParseError
+        If the KVL syntax is invalid
+    FileNotFoundError
+        If the file doesn't exist
+
+Example:
+    data = kvl.load("config.kvl")
+    data = kvl.load(Path("/etc/app/config.kvl"))
+    
+    with open("config.kvl") as f:
+        data = kvl.load(f)
+        
+Note:
+    This function applies automatic transformations for convenience.
+    Use parse() if you need the raw categorical structure.
+#+END_SRC
+
+*** kvl.loads(text, config=None)
+
+Load KVL from a string with automatic compacting.
+
+#+BEGIN_SRC python
+Parameters:
+    text : str
+        KVL text to parse
+    config : Optional[KvlConfig]
+        Configuration options. If None, auto-detects from header.
+
+Returns:
+    Dict[str, Any]
+        Parsed KVL data with automatic compacting of categorical structures
+        to lists. For example, repeated keys like:
+            tags = web
+            tags = api
+        Will return as: {'tags': ['web', 'api']}
+
+Raises:
+    KvlParseError
+        If the KVL syntax is invalid
+
+Example:
+    data = kvl.loads("name = test\nport = 8080")
+    # Returns: {'name': 'test', 'port': 8080}
+    
+    data = kvl.loads("tags = web\ntags = api")
+    # Returns: {'tags': ['web', 'api']}
+    
+Note:
+    This function applies automatic transformations for convenience.
+    Use parse() if you need the raw categorical structure.
+#+END_SRC
+
+*** kvl.parse(text, config=None)
+
+Parse KVL text into raw categorical structure.
+
+#+BEGIN_SRC python
+Parameters:
+    text : str
+        KVL text to parse
+    config : Optional[KvlConfig]
+        Configuration options. If None, auto-detects from header.
+
+Returns:
+    Dict[str, Any]
+        Raw categorical structure preserving the exact KVL representation.
+        Repeated keys become nested dictionaries, not lists.
+
+Example:
+    data = kvl.parse("tags = web\ntags = api")
+    # Returns: {'tags': {'web': {}, 'api': {}}}
+    
+    # Compare with loads():
+    data = kvl.loads("tags = web\ntags = api")
+    # Returns: {'tags': ['web', 'api']}
+
+Note:
+    This function preserves the exact categorical structure as defined
+    in the KVL specification. Use loads() for a more convenient format.
+#+END_SRC
+
+*** kvl.keyvals(text, config=None)
+
+Parse KVL into a list of single-key dictionaries.
+
+#+BEGIN_SRC python
+Parameters:
+    text : str
+        KVL text to parse
+    config : Optional[KvlConfig]
+        Configuration options
+
+Returns:
+    List[Dict[str, Any]]
+        List where each element is a dictionary with a single key-value pair.
+        Preserves order and allows duplicate keys.
+
+Example:
+    data = kvl.keyvals("name = John\nage = 30\nname = Jane")
+    # Returns: [{'name': 'John'}, {'age': 30}, {'name': 'Jane'}]
+
+Note:
+    Useful for processing KVL files where order matters or when you need
+    to handle duplicate keys separately.
+#+END_SRC
+
+** Serialization
+
+*** kvl.dump(data, file_or_path, config=None, include_header=False, **options)
+
+Serialize data to KVL and write to file.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Dict[str, Any]
+        Data to serialize (may contain nested dicts/lists)
+    file_or_path : Union[str, Path, TextIO]
+        File path or file-like object to write to
+    config : Optional[KvlConfig]
+        Configuration for separator and formatting
+    include_header : bool
+        Whether to include KVL header line
+    **options : dict
+        Additional formatting options
+
+Raises:
+    KvlSerializeError
+        If data cannot be serialized
+
+Example:
+    kvl.dump(data, "output.kvl")
+    kvl.dump(data, "output.kvl", config=KvlConfig(separator=":"))
+    
+    with open("output.kvl", "w") as f:
+        kvl.dump(data, f, include_header=True)
+#+END_SRC
+
+*** kvl.dumps(data, config=None, include_header=False, **options)
+
+Serialize data to KVL string.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Dict[str, Any]
+        Data to serialize
+    config : Optional[KvlConfig]
+        Configuration for separator and formatting
+    include_header : bool
+        Whether to include KVL header line
+    **options : dict
+        Additional formatting options
+
+Returns:
+    str
+        KVL formatted string
+
+Example:
+    text = kvl.dumps({"name": "test", "port": 8080})
+    # Returns: "name = test\nport = 8080"
+    
+    text = kvl.dumps(data, config=KvlConfig(separator="->"))
+    
+Note:
+    Lists in the input data are automatically expanded to categorical
+    structure for serialization. For example:
+    {'tags': ['web', 'api']} becomes:
+    tags = web
+    tags = api
+#+END_SRC
+
+** Merging
+
+*** kvl.merge(*configs)
+
+Merge multiple configurations together.
+
+#+BEGIN_SRC python
+Parameters:
+    *configs : Dict[str, Any]
+        Variable number of configurations to merge
+
+Returns:
+    Dict[str, Any]
+        Merged configuration (later values override earlier)
+
+Notes:
+    - Merging is associative: (A + B) + C = A + (B + C)
+    - Later values override earlier ones
+    - Nested structures are merged recursively
+
+Example:
+    base = kvl.load("base.kvl")
+    dev = kvl.load("dev.kvl")
+    local = kvl.load("local.kvl")
+    
+    final = kvl.merge(base, dev, local)
+#+END_SRC
+
+* Transform Functions
+
+*** kvl.compact(data, config=None)
+
+Compact nested dictionaries into lists where appropriate.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Any
+        Data structure to compact
+    config : Optional[KvlConfig]
+        Configuration (used for separator detection)
+
+Returns:
+    Any
+        Compacted data with lists instead of nested empty dicts
+
+Transformation Rules:
+    1. {'a': {}, 'b': {}, 'c': {}} → ['a', 'b', 'c']
+    2. {'': content} → content
+
+Example:
+    data = kvl.loads("tags = web\ntags = api\ntags = prod")
+    # data = {'tags': {'web': {}, 'api': {}, 'prod': {}}}
+    
+    compacted = kvl.compact(data)
+    # compacted = {'tags': ['web', 'api', 'prod']}
+#+END_SRC
+
+*** kvl.expand(data)
+
+Expand lists back to nested dictionary format for serialization.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Any
+        Data containing lists to expand
+
+Returns:
+    Any
+        Data with lists converted to nested dicts
+
+Notes:
+    - Inverse of compact() at the data-model level
+    - Round-tripped text may differ (duplicate keys collapse to a single entry)
+
+Example:
+    data = {'tags': ['web', 'api', 'prod']}
+    expanded = kvl.expand(data)
+    # expanded = {'tags': {'web': {}, 'api': {}, 'prod': {}}}
+#+END_SRC
+
+* Configuration
+
+** KvlConfig Class
+
+*** KvlConfig(separator="=", version="1.0", compact=False, space_before=True, space_after=True)
+
+Configuration for KVL parsing and serialization.
+
+#+BEGIN_SRC python
+Attributes:
+    separator : str
+        Key-value separator (=, :, ->, :=, etc.)
+    version : str
+        KVL version string
+    compact : bool
+        Enable automatic compacting
+    space_before : bool
+        Add space before separator
+    space_after : bool
+        Add space after separator
+
+Example:
+    config = KvlConfig(separator=":", space_before=False)
+    data = kvl.loads("name: test", config)
+#+END_SRC
+
+*** kvl.auto_config_for_separator(separator)
+
+Get automatic spacing configuration for a separator.
+
+#+BEGIN_SRC python
+Parameters:
+    separator : str
+        The separator to configure
+
+Returns:
+    KvlConfig
+        Configuration with appropriate spacing
+
+Defaults:
+    "=" → spaces around (key = value)
+    ":" → no space before (key: value)
+    "->" → spaces around (key -> value)
+    ":=" → spaces around (key := value)
+#+END_SRC
+
+*** kvl.parse_header(text)
+
+Parse KVL header from text.
+
+#+BEGIN_SRC python
+Parameters:
+    text : str
+        KVL text that may contain header
+
+Returns:
+    Optional[KvlConfig]
+        Parsed configuration or None if no header
+
+Example:
+    config = kvl.parse_header("#: kvl 1.0 compact")
+    # config.separator = ":"
+    # config.compact = True
+#+END_SRC
+
+*** kvl.generate_header(config)
+
+Generate KVL header line from configuration.
+
+#+BEGIN_SRC python
+Parameters:
+    config : KvlConfig
+        Configuration to encode
+
+Returns:
+    str
+        Header line like "#= kvl 1.0"
+#+END_SRC
+
+* Schema System
+
+** Schema Class
+
+*** Schema(fields, open=True, required=False)
+
+Flexible recursive schema for validating KVL data with field-oriented matching.
+
+#+BEGIN_SRC python
+Parameters:
+    fields : Dict[str, Union[type, dict, Tuple[type, Callable]]]
+        Field specifications - can be simple types, constraint specs, or nested schemas
+    open : bool
+        Allow unmatched fields (default: True)
+    required : bool
+        Fields in matched subschemas must be present (default: False)
+
+Field Specification Formats:
+    Simple type: {"population": int}
+    Constraint spec: {"port": {"type": int, "min": 1, "max": 65535}}
+    Nested schema: {"server": {"host": str, "port": int}}
+    Lambda constraint: {"port": (int, lambda v: 1 <= v <= 65535)}
+
+Example:
+    # Global field specifications (apply anywhere)
+    schema = Schema({
+        "population": int,
+        "capital": str,
+        "server": {
+            "port": {"type": int, "min": 8000, "max": 9000}
+        }
+    })
+    
+    # Open schema allows unknown fields, closed requires all fields to match
+    strict_schema = Schema(fields, open=False, required=True)
+#+END_SRC
+
+*** schema.loads(kvl_text)
+
+Load and validate KVL text with type conversion.
+
+#+BEGIN_SRC python
+Parameters:
+    kvl_text : str
+        KVL text to parse and validate
+
+Returns:
+    Dict[str, Any]
+        Typed Python dictionary
+
+Raises:
+    KvlParseError
+        If parsing fails
+    KvlTypeError
+        If type conversion fails
+    KvlValidationError
+        If constraint validation fails
+#+END_SRC
+
+*** schema.load(file_or_path)
+
+Load and validate KVL file with type conversion.
+
+#+BEGIN_SRC python
+Parameters:
+    file_or_path : Union[str, Path, TextIO]
+        File to load
+
+Returns:
+    Dict[str, Any]
+        Typed Python dictionary
+#+END_SRC
+
+*** schema.dumps(data, **options)
+
+Serialize typed data to KVL string.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Dict[str, Any]
+        Typed data to serialize
+    **options : dict
+        Serialization options
+
+Returns:
+    str
+        KVL formatted string
+#+END_SRC
+
+*** schema.dump(data, file_or_path, **options)
+
+Serialize typed data to KVL file.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Dict[str, Any]
+        Typed data to serialize
+    file_or_path : Union[str, Path, TextIO]
+        Output file
+    **options : dict
+        Serialization options
+#+END_SRC
+
+*** schema.validate(data, path="")
+
+Recursively validate data against schema without conversion.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Dict[str, Any]
+        Data to validate (with any nesting structure)
+    path : str
+        Current path for error reporting
+
+Returns:
+    bool
+        True if validation passes
+
+Validation Process:
+    1. Each key checked against ALL root schema keys
+    2. When match found, value validated recursively
+    3. Unmatched keys handled based on open/closed setting
+    4. Required fields checked in matched subschemas
+
+Raises:
+    KvlValidationError
+        If validation fails (unmatched field in closed schema, 
+        missing required field, constraint violation)
+    KvlTypeError
+        If type conversion fails
+#+END_SRC
+
+*** schema.deserialize(data, path="")
+
+Recursively convert KVL dict to typed Python dict with field-oriented validation.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Dict[str, Any]
+        Raw KVL data (with any nesting structure)
+    path : str
+        Current path for error reporting
+
+Returns:
+    Dict[str, Any]
+        Typed Python dictionary with recursive validation applied
+
+Algorithm:
+    1. Traverse data recursively, checking each key against root specs
+    2. Apply most specific matching schema (subschema overrides root)
+    3. Convert types and apply constraints
+    4. Pass through unmatched fields (if open schema)
+    5. Validate required fields in matched subschemas
+
+Examples:
+    # Schema applies field specs anywhere they appear
+    schema = Schema({"population": int, "capital": str})
+    
+    # Works with any nesting structure
+    data = schema.deserialize({
+        "Alabama": {"population": "5224279", "capital": "Montgomery"},
+        "Alaska": {"population": "740339", "capital": "Juneau"}
+    })
+    # Result: Alabama.population = 5224279 (int), capital = "Montgomery" (str)
+#+END_SRC
+
+*** schema.serialize(data, path="")
+
+Convert typed Python dict to KVL format.
+
+#+BEGIN_SRC python
+Parameters:
+    data : Dict[str, Any]
+        Typed Python data
+    path : str
+        Current path for error reporting
+
+Returns:
+    Dict[str, Any]
+        KVL-compatible dictionary
+#+END_SRC
+
+*** Schema.from_file(file_path)
+
+Load schema definition from .schema.kvl file.
+
+#+BEGIN_SRC python
+Parameters:
+    file_path : str
+        Path to schema file
+
+Returns:
+    Schema
+        Schema instance
+
+Example:
+    schema = Schema.from_file("config.schema.kvl")
+#+END_SRC
+
+*** Schema.from_kvl(kvl_text)
+
+Load schema definition from KVL text.
+
+#+BEGIN_SRC python
+Parameters:
+    kvl_text : str
+        KVL text containing schema
+
+Returns:
+    Schema
+        Schema instance
+#+END_SRC
+
+* Error Types
+
+** KvlError
+
+Base exception for all KVL errors.
+
+#+BEGIN_SRC python
+from kvl.errors import KvlError
+
+try:
+    data = kvl.load("config.kvl")
+except KvlError as e:
+    print(f"KVL error: {e}")
+#+END_SRC
+
+** KvlParseError
+
+Error during parsing KVL text.
+
+#+BEGIN_SRC python
+Attributes:
+    message : str
+        Error description
+    line : Optional[int]
+        Line number where error occurred
+    column : Optional[int]
+        Column number where error occurred
+
+Example:
+    try:
+        kvl.loads("invalid syntax")
+    except KvlParseError as e:
+        print(f"Parse error at line {e.line}: {e}")
+#+END_SRC
+
+** KvlSerializeError
+
+Error during serialization to KVL.
+
+#+BEGIN_SRC python
+Example:
+    try:
+        kvl.dumps({"key": object()})  # Can't serialize object
+    except KvlSerializeError as e:
+        print(f"Cannot serialize: {e}")
+#+END_SRC
+
+** KvlSchemaError
+
+Error in schema definition or processing.
+
+#+BEGIN_SRC python
+Attributes:
+    message : str
+        Error description
+    path : Optional[str]
+        Path in data structure
+    value : Optional[Any]
+        Problematic value
+
+Example:
+    try:
+        Schema.from_kvl("field = unknown_type")
+    except KvlSchemaError as e:
+        print(f"Schema error: {e}")
+#+END_SRC
+
+** KvlValidationError
+
+Data validation error (constraint failure).
+
+#+BEGIN_SRC python
+Example:
+    schema = Schema({"port": (int, lambda v: v <= 1024)})
+    try:
+        schema.loads("port = 8080")
+    except KvlValidationError as e:
+        print(f"Validation failed: {e}")
+#+END_SRC
+
+** KvlTypeError
+
+Type conversion error.
+
+#+BEGIN_SRC python
+Example:
+    schema = Schema({"port": int})
+    try:
+        schema.loads("port = not_a_number")
+    except KvlTypeError as e:
+        print(f"Type error: {e}")
+#+END_SRC
+
+* Utilities
+
+** kvl.utils.handle_read(file_or_path)
+
+Read content from file path or file-like object.
+
+#+BEGIN_SRC python
+Parameters:
+    file_or_path : Union[str, Path, TextIO]
+        Source to read from
+
+Returns:
+    str
+        File contents
+#+END_SRC
+
+** kvl.utils.handle_write(file_or_path, content)
+
+Write content to file path or file-like object.
+
+#+BEGIN_SRC python
+Parameters:
+    file_or_path : Union[str, Path, TextIO]
+        Destination to write to
+    content : str
+        Content to write
+#+END_SRC
+
+** kvl.utils.reraise_as(error_class, message_prefix="")
+
+Context manager for consistent error handling.
+
+#+BEGIN_SRC python
+Parameters:
+    error_class : type
+        KVL error class to raise
+    message_prefix : str
+        Prefix for error message
+
+Example:
+    with reraise_as(KvlSchemaError, "Invalid schema"):
+        # Code that might raise various exceptions
+        process_schema()
+#+END_SRC
+
+* Type Definitions
+
+#+BEGIN_SRC python
+# From kvl.utils
+FileOrPath = Union[str, Path, TextIO]
+KvlValue = Union[str, Dict[str, "KvlValue"]]
+
+# From kvl.parser
+KeyVal = NamedTuple("KeyVal", [("key", str), ("value", str)])
+#+END_SRC
+
+* Constants and Defaults
+
+#+BEGIN_SRC python
+# Default configuration
+DEFAULT_SEPARATOR = "="
+DEFAULT_VERSION = "1.0"
+
+# File extensions
+KVL_EXTENSION = ".kvl"
+#+END_SRC
+
+* Version Information
+
+#+BEGIN_SRC python
+import kvl
+print(kvl.__version__)  # Current version
+#+END_SRC

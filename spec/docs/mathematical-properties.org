@@ -1,0 +1,390 @@
+#+TITLE: KVL Mathematical Properties
+#+SUBTITLE: Monoid Theory and Compositional Semantics
+
+* Overview
+
+This document provides the mathematical foundations for KVL's merge operations and compositional semantics. KVL configurations form an algebraic structure (specifically, a commutative monoid) that enables predictable, composable configuration management.
+
+* Monoid Properties
+
+** Definition
+
+KVL configurations form a commutative monoid =(Config, +, ∅)= where:
+- =Config= is the set of all valid KVL configurations
+- =+= is the merge operation (set union on categorical structures)
+- =∅= is the empty configuration ={}= (identity element)
+
+** Closure
+
+*Property:* Merging two configurations produces a valid configuration.
+
+∀ A, B ∈ Config: A + B ∈ Config
+
+*Proof:* The merge operation applies recursively to nested structures, preserving the KVL data model at each level. Simple values, nested objects, and categorical structures all merge to produce valid KVL structures.
+
+** Associativity
+
+*Property:* The order of applying merge operations doesn't matter for grouping.
+
+∀ A, B, C ∈ Config: (A + B) + C = A + (B + C)
+
+*Proof:* By structural induction on configuration depth:
+
+*Base case (simple values):*
+- Left-to-right: =(A + B) + C= → merge(A,B) creates categorical, then merge with C adds to categorical
+- Right-to-left: =A + (B + C)= → merge(B,C) creates categorical, then merge with A adds to categorical
+- Result: Both yield same categorical structure ={A: {}, B: {}, C: {}}= ✓
+
+*Inductive case (nested objects):*
+Assume associativity holds for depth =n=. For depth =n+1=:
+- Each key merges independently
+- By induction hypothesis, each nested merge is associative
+- Therefore, the full merge is associative ✓
+
+*Categorical structures:*
+- Union operation is inherently associative
+- Set union: =(A ∪ B) ∪ C = A ∪ (B ∪ C)=
+- KVL categorical merge follows set union semantics ✓
+
+All merge operations produce categorical structures, which are then merged via set union. This ensures perfect associativity across all cases.
+
+** Commutativity
+
+*Property:* Merge order does not affect the categorical result (though array order may differ after compaction).
+
+∀ A, B ∈ Config: A + B = B + A (as sets)
+
+*Example:*
+#+begin_src kvl
+A: port = 8080
+B: port = 9000
+
+A + B (categorical): port = {8080: {}, 9000: {}}
+B + A (categorical): port = {9000: {}, 8080: {}}
+
+/= Both are equal as sets
+/= After compaction: order may vary [8080, 9000] vs [9000, 8080]
+#+end_src
+
+*Note on Array Order:* While the categorical structures are identical (set equality), compaction to arrays may preserve insertion order, resulting in different array orderings. Applications that require specific precedence should process the array accordingly (e.g., take first element for first-wins, last element for last-wins).
+
+** Identity Elements
+
+*Identity:* The empty configuration ={}= serves as both left and right identity.
+
+∀ A ∈ Config: A + {} = {} + A = A
+
+Since merge operations use set union semantics, merging with an empty configuration adds no new keys, preserving the original configuration. This makes KVL configurations a proper monoid (semigroup with identity).
+
+* Merge Operation Semantics
+
+** Simple Value Merge
+
+*Rule:* Conflicting simple values create categorical structures, preserving all information.
+
+#+begin_src kvl
+/= Configuration A
+port = 8080
+host = localhost
+
+/= Configuration B
+port = 9000
+
+/= Result: A + B (categorical representation)
+port = {8080: {}, 9000: {}}
+host = {localhost: {}}
+
+/= After standard API compaction:
+port = [8080, 9000]   # Array preserving both values
+host = "localhost"    # Single value, compacted to string
+#+end_src
+
+*Rationale:* Creating categorical structures for conflicting values preserves complete information from both configurations. Applications can decide precedence (first-wins, last-wins, or other strategies) after the merge. This is more flexible than hard-coded "last-wins" semantics.
+
+** Nested Object Merge
+
+*Rule:* Recursive categorical merge at each level. Non-conflicting keys are preserved; conflicting keys create categorical structures.
+
+#+begin_src kvl
+/= Configuration A
+server =
+    host = localhost
+    port = 8080
+    timeout = 30
+
+/= Configuration B
+server =
+    port = 9000
+    ssl = true
+
+/= Result: A + B (categorical)
+server =
+    host = { localhost = {} }      # From A (single value as categorical)
+    port = { 8080 = {}, 9000 = {} } # Both values preserved
+    timeout = { 30 = {} }          # From A (single value as categorical)
+    ssl = { true = {} }            # From B (single value as categorical)
+
+/= After standard API compaction:
+server =
+    host = localhost    # Single value compacted to string
+    port = [8080, 9000] # Multiple values become list
+    timeout = 30        # Single value compacted to string
+    ssl = true          # Single value compacted to string
+#+end_src
+
+*Formal Definition:*
+For nested objects O₁ and O₂:
+O₁ + O₂ = { k → merge(O₁[k], O₂[k]) | k ∈ keys(O₁) ∪ keys(O₂) }
+
+where merge(v₁, v₂) recursively applies categorical merge rules: conflicting simple values create categorical structures {v₁: {}, v₂: {}}.
+
+** Categorical Structure Merge
+
+*Rule:* Union merge combining all unique keys.
+
+#+begin_src kvl
+/= Configuration A
+tags = web
+tags = api
+tags = backend
+
+/= Configuration B
+tags = production
+tags = monitoring
+tags = api        # Duplicate key
+
+/= Result: A + B (internal categorical representation)
+tags = {
+    web = {},
+    api = {},
+    backend = {},
+    production = {},
+    monitoring = {}
+}
+
+/= User-facing API (after compaction):
+tags = ["web", "api", "backend", "production", "monitoring"]
+#+end_src
+
+*Formal Definition:*
+For categorical structures C₁ and C₂:
+C₁ + C₂ = C₁ ∪ C₂ (set union of keys)
+
+Duplicate keys are automatically deduplicated (set property).
+
+* Multi-Configuration Composition
+
+** Layered Configuration Example
+
+#+begin_src kvl
+/= Base defaults (defaults.kvl)
+server =
+    host = localhost
+    port = 8080
+    timeout = 30
+
+database =
+    host = localhost
+    port = 5432
+
+/= Environment-specific (production.kvl)
+server =
+    host = prod.example.com
+    port = 443
+    ssl = true
+
+database =
+    host = db.example.com
+
+/= User overrides (user.kvl)
+server =
+    port = 8443
+
+/= Final result: defaults + production + user (categorical)
+server =
+    host = {localhost: {}, prod.example.com: {}}
+    port = {8080: {}, 443: {}, 8443: {}}
+    timeout = {30: {}}
+    ssl = {true: {}}
+
+database =
+    host = {localhost: {}, db.example.com: {}}
+    port = {5432: {}}
+
+/= After standard API compaction:
+server =
+    host = [localhost, prod.example.com]  # Multiple values preserved
+    port = [8080, 443, 8443]              # All three values preserved
+    timeout = 30                          # Single value
+    ssl = true                            # Single value
+
+database =
+    host = [localhost, db.example.com]    # Both values preserved
+    port = 5432                           # Single value
+
+/= Applications can then apply precedence rules:
+/= - Last-wins: take last element of arrays
+/= - First-wins: take first element of arrays
+/= - Custom: process arrays as needed
+#+end_src
+
+** Associativity Guarantee
+
+Due to associativity, these are equivalent:
+- =(defaults + production) + user=
+- =defaults + (production + user)=
+
+This allows implementations to merge configurations in any grouping order, enabling optimizations like parallel merging of independent configuration subtrees.
+
+* Categorical Model vs. User API
+
+** Internal Representation (Categorical)
+
+KVL internally represents repeated keys as nested mappings to maintain mathematical properties:
+
+#+begin_src python
+{
+    "tags": {
+        "web": {},
+        "api": {},
+        "production": {}
+    }
+}
+#+end_src
+
+This representation ensures:
+1. Merge operations follow set union semantics
+2. Associativity is preserved
+3. Duplicate values are automatically deduplicated
+
+** User-Facing API (Compacted)
+
+The standard API automatically converts categorical structures to lists:
+
+#+begin_src python
+{
+    "tags": ["web", "api", "production"]
+}
+#+end_src
+
+This provides the intuitive interface users expect while maintaining mathematical soundness internally.
+
+** Why This Distinction Matters
+
+Consider merging lists with duplicate values:
+
+#+begin_src kvl
+/= Config A
+tags = web
+tags = api
+
+/= Config B
+tags = api        # Duplicate
+tags = production
+
+/= Categorical merge (correct)
+tags = {web: {}, api: {}, production: {}}  # 3 unique values
+→ User API: ["web", "api", "production"]
+
+/= Naive list concatenation (incorrect)
+tags = ["web", "api", "api", "production"]  # 4 values with duplicate
+#+end_src
+
+The categorical model ensures mathematical consistency while the user API provides convenience.
+
+* Practical Implications
+
+** Configuration Layering
+
+Systems can compose configurations from multiple sources with confidence:
+#+begin_example
+defaults → environment → user → cli-args
+#+end_example
+
+Each layer's values are preserved in categorical structures. Applications can then apply precedence rules (first-wins, last-wins, or custom logic) based on their needs. This is more flexible than hard-coded override semantics.
+
+** Parallel Merging
+
+Associativity enables parallel processing of configuration merges:
+- Independent subtrees can merge concurrently
+- Results can be combined in any order
+- No race conditions from merge order
+
+** Validation and Testing
+
+Mathematical properties enable property-based testing:
+- Test associativity: =(A + B) + C = A + (B + C)= for random configs
+- Test idempotency of categorical merge
+- Verify override semantics
+
+* Implementation Notes
+
+** Minimal Requirements
+
+A conforming implementation must:
+1. Preserve categorical structure in the parsed representation
+2. Implement merge operation following the rules above
+3. Maintain associativity for all merge operations
+
+** Optional Features
+
+Implementations may provide:
+1. Efficient set-based representation for categorical structures
+2. Streaming merge for large configurations
+3. Incremental merge for dynamic configuration updates
+4. Specialized merge strategies (e.g., append-only lists via schemas)
+
+** Testing Merge Properties
+
+#+begin_src python
+def test_associativity(A, B, C):
+    """Verify merge associativity."""
+    left = merge(merge(A, B), C)
+    right = merge(A, merge(B, C))
+    assert left == right
+
+def test_identity(A):
+    """Verify empty config as identity (both left and right)."""
+    assert merge(A, {}) == A
+    assert merge({}, A) == A
+
+def test_commutativity(A, B):
+    """Verify merge is commutative (as sets)."""
+    assert merge(A, B) == merge(B, A)
+
+def test_categorical_union(A, B):
+    """Verify categorical structures merge as sets."""
+    result = merge(A, B)
+    assert unique_keys(result) == unique_keys(A) | unique_keys(B)
+#+end_src
+
+* Relationship to Category Theory
+
+KVL configurations form a commutative monoid with rich categorical structure:
+
+** Commutative Monoid
+
+With both left and right identity (empty config) and commutativity, KVL configurations are a *commutative monoid*. This is stronger than a mere semigroup and enables additional algebraic reasoning.
+
+** Applicative Functor Structure
+
+The merge operation can be viewed as an applicative join operation, combining computational contexts (configurations) in a predictable way.
+
+** Connection to Lenses
+
+KVL's nested merge semantics align with lens composition in functional programming, enabling modular updates to nested configuration structures.
+
+* Further Reading
+
+- *Monoid Theory:* "Abstract Algebra" by Dummit and Foote
+- *Commutative Monoids:* "Categories for the Working Mathematician" by Saunders Mac Lane
+- *Configuration Management:* "The Twelve-Factor App" methodology
+- *Categorical Semantics:* "Category Theory for Programmers" by Bartosz Milewski
+- *Original CCL:* https://c-cube.github.io/ocaml-ccl/ by Dmitrii Kovanikov
+
+* References
+
+1. KVL Language Specification (language-specification.org)
+2. CCL (Categorical Configuration Language) by chshersh
+3. Commutative monoid structures in configuration languages
+4. Applicative parsing and composition

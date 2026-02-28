@@ -1,0 +1,84 @@
+/= KVL Formatting and Comment Examples
+/= Demonstrates various formatting styles
+
+title = KVL Formatting Demo
+
+/= Simple key-value pairs
+compact = test
+
+/= Expanded formatting with proper indentation
+expanded_object =
+  
+  /= Nested entries with comments
+  name = test
+  
+  value = 42
+  
+  active = true
+  
+  /= Nested object with list syntax
+  nested =
+    items =
+      = a
+      = b
+      = c
+    
+    settings =
+      debug = true
+      log_level = info
+
+/= Lists using repeated keys
+array = one
+array = two
+array = three
+
+/= Alternative list syntax with empty keys
+alt_list =
+  = first
+  = second
+  = third
+
+/= Multiple object entries
+record =
+  name = item1
+  value = 1
+
+record =
+  name = item2
+  value = 2
+
+record =
+  name = item3
+  value = 3
+  
+  details =
+    description = Complex item
+    tags =
+      = tag1
+      = tag2
+
+/= Multiline values
+story =
+  Once upon a time, there was a configuration language
+  that was elegant and simple to use.
+  It used only key-value pairs.
+
+/= Sections for organization
+=== Section: Database ===
+host = localhost
+port = 5432
+user = admin
+
+=== Section: Cache ===
+redis_url = redis://localhost:6379
+ttl = 3600
+
+/= Different comment styles
+/= This is a standard comment
+// = This looks like a C++ comment
+# = This looks like a shell comment
+
+/= Final values
+key1 = value1
+key2 = value2
+key3 = value3

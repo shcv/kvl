@@ -1,0 +1,16 @@
+{
+  "/": [
+    "Categorical structures demonstration",
+    "Repeated keys create list structure (compacted)"
+  ],
+  "tags": [
+    "web",
+    "api",
+    "production"
+  ],
+  "permissions": [
+    "read",
+    "write",
+    "admin"
+  ]
+}

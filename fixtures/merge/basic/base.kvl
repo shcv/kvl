@@ -1,0 +1,13 @@
+/= Base configuration for merge testing
+
+server =
+    host = localhost
+    port = 8080
+    timeout = 30
+
+database =
+    host = db-server
+    port = 5432
+
+tags = web
+tags = api

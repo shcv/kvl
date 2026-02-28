@@ -1,0 +1,11 @@
+{
+  "/": [
+    "Simple KVL configuration",
+    "Basic key-value pairs without nesting"
+  ],
+  "name": "John Doe",
+  "age": "30",
+  "active": "true",
+  "port": "8080",
+  "email": "john@example.com"
+}

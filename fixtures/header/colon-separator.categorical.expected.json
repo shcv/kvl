@@ -1,0 +1,11 @@
+{
+  "host": {
+    "localhost": {}
+  },
+  "port": {
+    "8080": {}
+  },
+  "url": {
+    "https://example.com": {}
+  }
+}

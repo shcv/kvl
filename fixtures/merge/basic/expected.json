@@ -1,0 +1,29 @@
+{
+  "/": [
+    "Base configuration for merge testing",
+    "Overlay configuration for merge testing"
+  ],
+  "server": {
+    "host": "localhost",
+    "port": [
+      "8080",
+      "9000"
+    ],
+    "timeout": "30",
+    "ssl": "true"
+  },
+  "database": {
+    "host": "db-server",
+    "port": "5432",
+    "name": "myapp_db"
+  },
+  "tags": [
+    "web",
+    "api",
+    "production"
+  ],
+  "cache": {
+    "host": "redis-server",
+    "port": "6379"
+  }
+}

@@ -1,0 +1,7 @@
+#: kvl 1.0 -+
+high:
+    - critical-bug
+    - security-fix
+low:
+    + nice-to-have
+    + refactor

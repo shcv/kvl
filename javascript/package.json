@@ -1,0 +1,22 @@
+{
+  "name": "kvl",
+  "version": "0.1.0",
+  "description": "Key-Value Language (KVL) parser and serializer",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js"
+    }
+  },
+  "bin": {
+    "kvl": "./src/cli.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

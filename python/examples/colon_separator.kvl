@@ -1,0 +1,15 @@
+#: kvl 1.0
+/: KVL example with colon separator
+
+name: John Doe
+age: 30
+active: true
+
+server:
+    host: localhost
+    port: 8080
+    ssl: false
+
+tags: web
+tags: api
+tags: secure

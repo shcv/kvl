@@ -1,0 +1,14 @@
+/= Overlay configuration for merge testing
+
+server =
+    port = 9000
+    ssl = true
+
+database =
+    name = myapp_db
+
+tags = production
+
+cache =
+    host = redis-server
+    port = 6379
