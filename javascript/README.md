@@ -1,83 +1,74 @@
-# ccl-js: Categorical Configuration Language for JavaScript
+# KVL JavaScript Implementation
 
-This is a JavaScript implementation of the Categorical Configuration Language (CCL), a minimalist configuration format focused on simplicity, composability, and mathematical soundness.
+JavaScript implementation of the Key-Value Language (KVL) parser, serializer, and merge operations.
 
-**Note: This package is currently in planning stages. See [design.md](design.md) for implementation details.**
-
-## Features (Planned)
-
-- Simple key-value format with minimal syntax
-- Hierarchical structure through indentation
-- Mathematically sound composition of configurations 
-- Support for nested structures, arrays, and common value types
-- Clean JavaScript API similar to standard JSON methods
-- Browser and Node.js compatibility
-
-## Installation (Coming Soon)
+## Installation
 
 ```bash
-npm install ccl-js
+npm install kvl
 ```
 
-## Quick Start (Preview)
+## Usage
 
 ```javascript
-import { parse, stringify } from 'ccl-js';
+import { loads, dumps, parse, merge, compact } from 'kvl';
 
-// Parse CCL from a string
-const config = parse(`
-server = 
+// Parse KVL text to a compacted JavaScript object
+const config = loads(`
+server =
     host = localhost
     port = 8080
     debug = true
-users = 
-    admin = 
-        name = Admin User
-        roles = admin
-        roles = editor
-    guest = 
-        name = Guest User
-        roles = reader
 `);
 
-console.log(config.server.host);    // localhost
-console.log(config.server.port);    // 8080 (as number)
-console.log(config.users.admin.roles);  // ["admin", "editor"]
+console.log(config.server.host);    // "localhost"
+console.log(config.server.port);    // 8080
 
-// Serialize to CCL
-const cclText = stringify(config);
+// Serialize a JavaScript object to KVL text
+const kvlText = dumps(config);
 
-// Node.js file operations
-import { readFileSync, writeFileSync } from 'fs';
+// Low-level categorical parse (preserves repeated key structure)
+const raw = parse(`
+tags = red
+tags = green
+tags = blue
+`);
+// raw.tags = { red: {}, green: {}, blue: {} }
 
-// Load CCL from a file
-const configData = readFileSync('config.ccl', 'utf8');
-const fileConfig = parse(configData);
-
-// Save to a file
-writeFileSync('config.ccl', stringify(config));
+// Merge two configurations
+const merged = compact(merge(parse(base), parse(overlay)));
 ```
 
-## CLI (Planned)
+## CLI
 
 ```bash
-# Convert between formats
-ccl-js convert input.json output.ccl
+# Parse KVL to JSON (compacted)
+node src/cli.js parse config.kvl
 
-# Validate a CCL file
-ccl-js validate config.ccl
+# Parse KVL to JSON (raw categorical)
+node src/cli.js parse-raw config.kvl
 
-# Format a CCL file 
-ccl-js format config.ccl
+# Serialize JSON to KVL (reads from stdin)
+echo '{"name": "test"}' | node src/cli.js serialize
 
-# Merge multiple CCL files
-ccl-js merge config1.ccl config2.ccl > merged.ccl
+# Merge two KVL files
+node src/cli.js merge base.kvl overlay.kvl
 ```
 
-## About CCL
+## API
 
-CCL is designed to be:
+- `loads(text)` - Parse KVL text to compacted JavaScript object
+- `load(filepath)` - Parse KVL file to compacted JavaScript object
+- `parse(text)` - Parse KVL text to raw categorical structure
+- `dumps(obj)` - Serialize JavaScript object to KVL text
+- `dump(obj, filepath)` - Serialize JavaScript object to KVL file
+- `merge(a, b)` - Merge two categorical structures
+- `compact(obj)` - Convert categorical structure to compacted form
+- `expand(obj)` - Convert compacted form to categorical structure
 
-- **Simple**: Minimal syntax, easy to read and write
-- **Composable**: Configurations can be merged with well-defined semantics
-- **Versatile**: Suitable for configuration files, data exchange, and more
+## Testing
+
+```bash
+npm test             # Run all tests
+npm run test:watch   # Run tests in watch mode
+```

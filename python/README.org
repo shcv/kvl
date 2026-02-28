@@ -24,7 +24,7 @@ pip install kvl
 
 # Or install from source
 git clone https://github.com/shcv/kvl
-cd kvl/py
+cd kvl/python
 pip install -e .
 #+END_SRC
 

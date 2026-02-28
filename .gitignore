@@ -16,8 +16,9 @@ go/kvl
 
 # Zig
 zig/zig-cache/
-zig/zig-out/
 zig/.zig-cache/
+zig/zig-out/
+zig/test_io
 
 # Editors
 *.swp
