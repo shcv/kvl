@@ -2,83 +2,65 @@
 
 Items to revisit from the 6-agent deep review of spec and implementations.
 
-* Implementation Bugs
+* DONE: Implementation Bugs (fixed 2026-02-27/28)
 
-** Go
-- CRLF: does not strip =\r= from line endings; =\r= embeds in values
-- Whitespace: strips only 1 space after separator; should strip all leading/trailing
-- Empty value compaction: ={key:{}}= should compact to string, not stay as object
-- Indentation: treats deeper indent after valued key as continuation instead of nesting
+** DONE Go
+- CRLF: stripped =\r= from line endings
+- Whitespace: now strips all leading/trailing whitespace from values
+- Escape: fixed =findUnescapedSep= — simple =\= before sep check, no pair processing
 
-** Zig
-- =---= handling: treats as header separator; should be regular key-value
-- O(n^2) merge performance: =OrderedMap.findIndex()= is linear scan; add hash index
+** DONE Zig
+- =---= handling: now treated as bare key, not header separator
 
-** JavaScript
-- O(n^2) merge performance: =merge()= uses spread copy; mutate in-place or add hash index
+** DONE Python and JavaScript
+- Serializers now handle multiline values (continuation lines)
+- Recursive =\== splitting fixed — first split only
+- Escape: fixed =findUnescapedSeparator= — simple =\= before sep check, no pair processing
 
-** Python and JavaScript
-- Serializers cannot serialize multiline values (values containing =\n=)
-- Go and Zig serializers handle this correctly
+** Remaining
+- Go: deeper indent after valued key — continuation vs nesting (see next-steps.org)
+- Go: empty value compaction: ={key:{}}= should compact to string
+- Python, Zig, JavaScript: recursion depth limit for indentation nesting (not just value parsing)
+- Zig: O(n^2) merge performance (=OrderedMap.findIndex()= is linear scan)
+- JavaScript: O(n^2) merge performance (=merge()= uses spread copy)
+- Emacs: no input size limit (should be 10MB), no recursion depth limit
 
-** Python, Zig, JavaScript
-- Recursion depth limit (100) only enforced for value parsing, not indentation nesting
-- Go correctly enforces it for both
+* DONE: Fixture Issues (fixed 2026-02-27/28)
 
-** Emacs
-- No input size limit (should be 10MB)
-- No recursion depth limit (relies on Emacs =max-lisp-eval-depth=)
+** DONE Wrong categorical outputs
+- List-marker categorical fixtures reverted to arrays (correct — preserves order)
 
-* Fixture Issues
+** DONE Backslash-decrement spec/fixture disagreement
+- Resolved: fixture was correct, old spec example was wrong (used pair processing)
+- Simple rule =\sep → sep= applied left-to-right: =x\\\=y= → =x\\=y= (two literal =\=, then =\== escape)
+- New fixture =escape/double-backslash-before-sep= tests bare-key case
 
-** Wrong categorical outputs
-- =header/list-marker-dash.categorical.expected.json= uses array format instead of dict
-- =header/list-marker-multi.categorical.expected.json= same issue
-- Categorical output should always be nested dicts, never arrays
+** DONE Cross-implementation divergences
+- Inline === splitting: DECIDED — first split only (all impls fixed)
+- =\\== tokenization: DECIDED — simple rule, no pair processing (all impls fixed)
 
-** Backslash-decrement spec/fixture disagreement
-- =escape/backslash-decrement= line 3: =three = x\\\=y=
-- Fixture expects =x\\=y= (two backslashes)
-- Spec example says =a\\\=b= produces =a\=b= (one backslash)
-- Need to resolve which interpretation is correct (see pair processing)
+* Missing Fixtures (reduced from 22 gaps)
 
-* Missing Fixtures (22 gaps found)
+** Added
+- =:== separator (=header/colon-equals-separator=)
+- Unescaped === in values (=valid/separator-in-value=)
+- Left-identity merge (=merge/left-identity=)
+- =\\== at split position (=escape/double-backslash-before-sep=)
 
-** Critical
-- =:== separator (standard, zero tests)
+** Still missing
 - Empty key pattern (== value=)
-- Unescaped === in values (=key = x = y=)
 - Custom separator beyond standard set
 - Merge associativity verification (3-way merge)
-
-** Important
 - Header options (=space-before=false=, =compact=true=, etc.)
 - Tab-based indentation
-- Strict indent mode header options (=indent=tabs=, =indent=spaces=)
+- Strict indent mode header options
 - Nested list markers
 - Separator-on-same-line-as-list-marker rejection
 - Missing-separator error detection
 - Malformed header error detection
-- End-of-line non-comment verification (=key = value # not a comment=)
-- Backslash literal (=C:\Windows\System32=)
-- Escape with non-default separator
 - Deeply nested objects (5+ levels)
 - Blank line handling
-- Leading/trailing key whitespace
-- Left identity merge (empty base)
 - Categorical union merge (overlapping repeated keys)
-
-* Cross-Implementation Divergences
-
-** Inline === splitting (SPEC DECISION NEEDED)
-- Python/JS: =a = b = c= produces ={a:{b:"c"}}= (recursive split)
-- Go/Zig: =a = b = c= produces ={a:"b = c"}= (first split only)
-- Spec decision: first split only is correct
-
-** =\\== tokenization (SPEC CLARIFICATION NEEDED)
-- In string =x\\=y=: Go sees =\\= as pair producing =\=, then === as separator
-- Python/JS/Zig see =\= before === as escape, preceding =\= as literal
-- Matters for round-trip of values containing literal =\==
 
 * Editor Modes
 - Tree-sitter grammar created but not yet tested with actual editors

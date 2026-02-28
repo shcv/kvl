@@ -153,41 +153,57 @@ def parse_line(line: str, config: KvlConfig) -> tuple:
     return (indent, key, value)
 #+end_src
 
+** First-Split-Only Parsing
+
+When splitting a line into key and value, use only the *first* unescaped separator occurrence. Everything after the first separator is the value, even if it contains additional separator characters:
+
+#+begin_src python
+# CORRECT: first-split-only
+# "a = b = c" → key="a", value="b = c"
+
+sep_pos = find_unescaped_separator(stripped, config.separator)
+key = stripped[:sep_pos].strip()
+value = stripped[sep_pos + len(config.separator):].strip()
+
+# WRONG: recursive splitting
+# "a = b = c" → {a: {b: "c"}}  ← this is a bug
+#+end_src
+
 ** Escape Sequence Handling
 
-Find separators that aren't escaped with backslashes:
+The escape rule is: =\{sep}= → ={sep}=. A backslash immediately before the separator escapes it. All other backslashes are literal. No pair processing, no backslash counting.
 
 #+begin_src python
 def find_unescaped_separator(text: str, separator: str) -> int:
-    """Find first occurrence of separator not preceded by backslash."""
+    """Find first occurrence of separator not immediately preceded by backslash."""
     pos = 0
-    while pos < len(text):
+    sep_len = len(separator)
+    while pos <= len(text) - sep_len:
         sep_pos = text.find(separator, pos)
         if sep_pos == -1:
             return -1
 
-        # Check if preceded by backslash
         if sep_pos > 0 and text[sep_pos - 1] == '\\':
-            # Count consecutive backslashes
-            num_backslashes = 0
-            i = sep_pos - 1
-            while i >= 0 and text[i] == '\\':
-                num_backslashes += 1
-                i -= 1
-
-            # Odd number of backslashes means separator is escaped
-            if num_backslashes % 2 == 1:
-                pos = sep_pos + 1
-                continue
+            # Backslash immediately before separator = escaped
+            pos = sep_pos + 1
+            continue
 
         return sep_pos
 
     return -1
 
 def unescape_text(text: str, separator: str) -> str:
-    """Remove escape sequences: \\<sep> → <sep>."""
-    escaped = '\\' + separator
-    return text.replace(escaped, separator)
+    """Remove escape sequences: \<sep> → <sep>, all other \ literal."""
+    result = []
+    i = 0
+    while i < len(text):
+        if text[i] == '\\' and text[i+1:i+1+len(separator)] == separator:
+            result.append(separator)
+            i += 1 + len(separator)
+        else:
+            result.append(text[i])
+            i += 1
+    return ''.join(result)
 #+end_src
 
 ** Comment Handling
@@ -282,6 +298,13 @@ def serialize_value(key: str, value: Any, indent: int, config: KvlConfig) -> str
                 lines.append(" " * (indent + 2) + sublines)
             return "\n".join(lines)
 
+    elif isinstance(value, str) and '\n' in value:
+        # Multiline string — serialize as continuation lines
+        lines = [f"{key}{config.separator}"]
+        for line in value.split('\n'):
+            lines.append(" " * (indent + 2) + line)
+        return "\n".join(lines)
+
     else:
         # Simple value
         return f"{key}{config.separator} {value}"
@@ -349,6 +372,99 @@ def compact(data: Any, config: KvlConfig) -> Any:
     else:
         return data
 #+end_src
+
+* Comment Stripping
+
+KVL comments (=/== keys) are preserved in the parsed structure by design. Implementations should provide a way to strip them when not needed.
+
+** Comment Key Declaration
+
+The header can declare which key is the comment key (default: =/==):
+
+#+begin_src kvl
+#= kvl 1.0
+/= This is a comment using the default comment key
+name = value
+#+end_src
+
+** Stripping API
+
+Provide comment stripping at three levels:
+
+*** Parameter to =loads()=
+
+#+begin_src python
+data = kvl.loads(text, strip_comments=True)
+# Removes all "/=" keys from the result
+#+end_src
+
+*** Standalone utility function
+
+#+begin_src python
+def strip_comments(data: dict, comment_key: str = "/=") -> dict:
+    """Remove comment keys from parsed KVL data recursively."""
+    if not isinstance(data, dict):
+        return data
+    return {
+        k: strip_comments(v, comment_key)
+        for k, v in data.items()
+        if k != comment_key
+    }
+#+end_src
+
+*** Raw =parse()= always preserves comments
+
+The low-level API never strips comments — they are regular key-value pairs in the categorical model.
+
+* Merge Policy Helpers
+
+Categorical merge preserves all information but applications typically need a single value per key. Provide helper functions for common resolution policies.
+
+** First-Wins
+
+Use the first value encountered (from the base configuration):
+
+#+begin_src python
+def first_wins(values: list) -> Any:
+    """Take the first value from a list of categorical values."""
+    return values[0] if values else None
+
+def apply_policy(data: dict, policy=first_wins) -> dict:
+    """Apply a merge resolution policy to compacted data."""
+    result = {}
+    for key, value in data.items():
+        if isinstance(value, list):
+            result[key] = policy(value)
+        elif isinstance(value, dict):
+            result[key] = apply_policy(value, policy)
+        else:
+            result[key] = value
+    return result
+#+end_src
+
+** Last-Wins
+
+Use the last value encountered (from the overlay configuration):
+
+#+begin_src python
+def last_wins(values: list) -> Any:
+    """Take the last value from a list of categorical values."""
+    return values[-1] if values else None
+#+end_src
+
+** Choice (Error on Conflict)
+
+Require explicit resolution when values conflict:
+
+#+begin_src python
+def choice(values: list) -> Any:
+    """Raise error if multiple values exist (require explicit choice)."""
+    if len(values) > 1:
+        raise ValueError(f"Conflicting values: {values}")
+    return values[0] if values else None
+#+end_src
+
+These are application-layer conveniences. Categorical merge is the correct foundation; policies operate on the compacted result.
 
 * Language-Specific Considerations
 
@@ -429,10 +545,12 @@ Test various escaping scenarios:
 #+begin_src python
 def test_escaping():
     tests = [
-        ("url = https\\://example.com", {"url": "https://example.com"}),
+        # \ before non-separator is literal
+        ("path = C:\\Users\\Name", {"path": "C:\\Users\\Name"}),
+        # \= is escaped separator → literal =
         ("equation = x\\=y", {"equation": "x=y"}),
+        # \\ before = : first \ is literal, second \ escapes =
         ("value = a\\\\=b", {"value": "a\\=b"}),
-        ("value = a\\\\\\=b", {"value": "a\\\\=b"}),
     ]
     for kvl_text, expected in tests:
         assert loads(kvl_text) == expected

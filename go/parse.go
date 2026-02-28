@@ -27,6 +27,11 @@ func parse(text string) (*node, Config, error) {
 		return nil, Config{}, fmt.Errorf("input exceeds maximum size of %d bytes", maxInputSize)
 	}
 
+	// Normalize CRLF to LF
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	// Strip any remaining standalone CR
+	text = strings.ReplaceAll(text, "\r", "\n")
+
 	lines := strings.Split(text, "\n")
 	cfg := DefaultConfig()
 
@@ -374,28 +379,27 @@ func parseLine(content string, cfg Config) (string, string) {
 	key = strings.TrimRight(key, " \t")
 
 	rest := content[pos+len(sep):]
-	// Trim leading space from value (space after separator)
-	if len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
-		rest = rest[1:]
-	}
+	// Trim all leading and trailing whitespace from value
+	rest = strings.TrimSpace(rest)
 
 	return key, rest
 }
 
 // findUnescapedSep finds the first occurrence of sep in text that is not
-// preceded by an odd number of backslashes.
+// immediately preceded by a backslash.
+//
+// Simple escape rule: a backslash directly before the separator escapes it.
+// No pair processing — \\ before separator means the second \ escapes the
+// separator, regardless of how many backslashes precede it.
 func findUnescapedSep(text, sep string) int {
 	sepLen := len(sep)
 	for i := 0; i <= len(text)-sepLen; i++ {
 		if text[i:i+sepLen] == sep {
-			// Count preceding backslashes
-			bs := 0
-			for j := i - 1; j >= 0 && text[j] == '\\'; j-- {
-				bs++
+			if i > 0 && text[i-1] == '\\' {
+				// Backslash immediately before separator = escaped
+				continue
 			}
-			if bs%2 == 0 {
-				return i
-			}
+			return i
 		}
 	}
 	return -1

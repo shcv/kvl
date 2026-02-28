@@ -635,6 +635,12 @@ pub fn parseWithConfig(alloc: Allocator, input: []const u8, config_opt: ?Config)
                     .object => |_| {},
                     .array => |_| {},
                 }
+            } else if (raw_indent == 0) {
+                // Top-level line without separator = bare key (empty object)
+                const bare_key = std.mem.trim(u8, line_content, " \t");
+                if (bare_key.len > 0) {
+                    try parent.mergeKey(alloc, bare_key, .{ .object = try createMap(alloc) });
+                }
             }
             i += 1;
             continue;

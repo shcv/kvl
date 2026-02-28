@@ -1,18 +1,10 @@
 {
   "high": [
-    {
-      "critical-bug": {}
-    },
-    {
-      "security-fix": {}
-    }
+    {"critical-bug": {}},
+    {"security-fix": {}}
   ],
   "low": [
-    {
-      "nice-to-have": {}
-    },
-    {
-      "refactor": {}
-    }
+    {"nice-to-have": {}},
+    {"refactor": {}}
   ]
 }

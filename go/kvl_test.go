@@ -730,6 +730,85 @@ func TestHeaderListMarkerMulti(t *testing.T) {
 	}
 }
 
+// --- CRLF handling ---
+
+func TestCRLFLineEndings(t *testing.T) {
+	input := "name = John\r\nage = 30\r\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if v := result["name"]; v != "John" {
+		t.Errorf("name: got %q, want %q", v, "John")
+	}
+	if v := result["age"]; v != "30" {
+		t.Errorf("age: got %q, want %q", v, "30")
+	}
+}
+
+func TestCRLFNested(t *testing.T) {
+	input := "server =\r\n    host = localhost\r\n    port = 8080\r\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	server, ok := result["server"].(map[string]any)
+	if !ok {
+		t.Fatalf("server should be map, got %T", result["server"])
+	}
+	if v := server["host"]; v != "localhost" {
+		t.Errorf("host: got %q, want %q", v, "localhost")
+	}
+}
+
+// --- Whitespace trimming ---
+
+func TestExtraWhitespace(t *testing.T) {
+	input := "key   =   value\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if v := result["key"]; v != "value" {
+		t.Errorf("key: got %q, want %q", v, "value")
+	}
+}
+
+func TestTrailingWhitespace(t *testing.T) {
+	input := "key = value   \n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if v := result["key"]; v != "value" {
+		t.Errorf("key: got %q, want %q", v, "value")
+	}
+}
+
+func TestInternalWhitespacePreserved(t *testing.T) {
+	input := "title = Hello   World\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if v := result["title"]; v != "Hello   World" {
+		t.Errorf("title: got %q, want %q", v, "Hello   World")
+	}
+}
+
+// --- Backslash handling ---
+
+func TestBackslashLiteral(t *testing.T) {
+	input := "path = C:\\Users\\test\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if v := result["path"]; v != `C:\Users\test` {
+		t.Errorf("path: got %q, want %q", v, `C:\Users\test`)
+	}
+}
+
 // helper
 func toJSON(v any) string {
 	b, _ := json.MarshalIndent(v, "", "  ")

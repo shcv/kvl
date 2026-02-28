@@ -88,6 +88,11 @@ export function expand(data) {
     return result;
   }
 
+  // Strings with newlines are multiline text values, not categorical
+  if (typeof data === 'string' && data.includes('\n')) {
+    return data;
+  }
+
   // Primitive → categorical
   if (data == null) return {};
   return { [String(data)]: {} };

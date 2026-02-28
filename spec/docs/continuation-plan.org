@@ -1,0 +1,125 @@
+#+TITLE: Continuation/Multiline Semantics Plan
+
+Detailed plan for auditing and fixing multiline value handling across all implementations.
+
+* The Rule
+
+Indentation beyond the parent key is continuation. The continuation block is
+then recursively parsed for KVL content:
+
+1. *Capture*: all lines indented deeper than the parent are part of the block
+2. *Re-parse*: check if the block is "proper" KVL:
+   - Every line at the block's base indentation must have a separator
+   - Lines indented deeper than base are sub-continuations of the preceding key
+   - If ALL base-level lines have separators → nested KVL structure
+   - If ANY base-level line lacks a separator → entire block is plain text
+3. *Whitespace*:
+   - =parse()= (low-level): preserves raw whitespace including leading =\n= and absolute indentation
+   - =loads()= (high-level): strips leading =\n=, dedents to the block's base indentation level
+
+* Examples
+
+#+begin_src kvl
+/= Case 1: Nested KVL (all base lines have separator)
+server =
+    host = localhost
+    port = 8080
+/= → {server: {host: "localhost", port: "8080"}}
+
+/= Case 2: Plain text (no base line has separator)
+description =
+    This is a long
+    description text
+/= → {description: "This is a long\ndescription text"}
+
+/= Case 3: Plain text (mixed — one base line lacks separator)
+notes =
+    line one
+    key = value
+/= → {notes: "line one\nkey = value"}
+
+/= Case 4: Key with inline value AND indented children
+/= The inline value is the first entry; children follow
+server = primary
+    host = localhost
+    port = 8080
+/= → {server: {primary: {}, host: "localhost", port: "8080"}}
+/= (inline value "primary" becomes a categorical entry)
+
+/= Case 5: Nested continuation (sub-key has its own multiline value)
+config =
+    greeting =
+        Hello there,
+        welcome aboard
+    port = 8080
+/= → {config: {greeting: "Hello there,\nwelcome aboard", port: "8080"}}
+
+/= Case 6: Deeply nested
+a =
+    b =
+        c =
+            d = value
+/= → {a: {b: {c: {d: "value"}}}}
+#+end_src
+
+* Known Issues
+
+** Go: deeper indent after valued key
+- Currently treats =server = primary\n    host = localhost= as multiline
+  continuation ("primary\n    host = localhost") instead of nested structure
+- Should check if the continuation block is proper KVL and nest if so
+- Fix: apply the re-parse rule to blocks following valued keys, same as empty-value keys
+
+** Spec wording
+- Current multiline section in language-specification.org uses "two-stage processing" language
+- Should be tightened: "continuation block is recursively parsed"
+- Clarify that base-level means "relative to the continuation's indentation, not the file"
+- Add Case 4 (valued key with children) to spec examples
+
+* Implementation Audit Steps
+
+** Step 1: Create fixtures
+- =edge/valued-key-with-children.kvl= — Case 4 above
+- =edge/nested-continuation.kvl= — Case 5 above
+- =edge/deeply-nested.kvl= — Case 6 above (5+ levels)
+- =edge/mixed-continuation.kvl= — Case 3 with separator on some lines
+
+** Step 2: Test all implementations against new fixtures
+- Run conformance, identify which implementations fail
+- Expected: Go will fail Case 4 (continuation instead of nesting)
+
+** Step 3: Fix implementations
+- Go: fix =buildTree= to re-parse continuation blocks with separators as nested KVL
+- Others: verify they handle Cases 4-6 correctly
+
+** Step 4: Update spec
+- Tighten multiline section wording
+- Add Cases 4-6 to examples
+- Clarify "base indentation" is relative to the block, not the file
+- Document that inline values before nested blocks become categorical entries
+
+** Step 5: Conformance verification
+- All implementations pass all fixtures
+- Round-trip test: parse → serialize → parse produces equivalent results
+
+* Staged Changes (uncommitted, pending yubikey)
+
+The following changes are staged from the escape/spec work and need to be committed:
+
+- =go/parse.go= — simple escape rule in =findUnescapedSep=, CRLF, whitespace
+- =python/kvl/parser.py= — simple escape rule, first-split-only, multiline serialization
+- =javascript/src/parser.js= — same as Python
+- =python/kvl/transform.py=, =javascript/src/transform.js= — multiline expand fix
+- =go/kvl_test.go= — new tests
+- =zig/src/kvl.zig= — =---= fix
+- =spec/docs/language-specification.org= — escape, multiline, type inference, grammar
+- =spec/docs/implementation-guide.org= — escape, comment stripping, merge policies
+- =spec/docs/next-steps.org=, =spec/docs/review-findings.org= — status updates
+- =CLAUDE.md=, =README.org= — updated to match
+- =fixtures/escape/double-backslash-before-sep.*= — new fixture
+- =fixtures/valid/separator-in-value.*= — new fixture
+- =fixtures/header/colon-equals-separator.*= — new fixture
+- =fixtures/merge/left-identity/*= — new fixture
+- =fixtures/header/list-marker-*.categorical.expected.json= — reverted to arrays
+
+240/240 conformance across Python (lib), Python (CLI), Go, Zig, JavaScript.

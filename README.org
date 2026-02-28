@@ -22,7 +22,7 @@ The complete language specification is maintained in the [[file:spec/][spec/]] d
 - *Associative merging* - Combine configurations predictably
 - *Categorical structure* - Repeated keys create nested categorical mappings
 - *Multiple separators* - Support for =, :, ->, := and custom separators
-- *Type inference* - Automatic detection of strings, numbers, and booleans
+- *Multiline values* - Indented continuation blocks for structured or plain text values
 
 * Quick Example
 

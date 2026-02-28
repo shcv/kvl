@@ -1,0 +1,7 @@
+{
+  "name": "John Doe",
+  "port": "8080",
+  "nested": {
+    "host": "localhost"
+  }
+}

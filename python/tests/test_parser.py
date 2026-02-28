@@ -236,7 +236,11 @@ class TestAnonymousLists:
         assert result == expected
 
     def test_nested_list_structures(self):
-        """Test nested structures within anonymous lists."""
+        """Test nested structures within anonymous lists.
+
+        With first-split-only, ``= name = react`` splits at the first ``=``
+        giving key="" and value="name = react" (literal).
+        """
         content = """
         packages =
           = name = react
@@ -247,7 +251,7 @@ class TestAnonymousLists:
         result = kvl.loads(content)
         expected = {
             "packages": {
-                "": {"name": ["react", "typescript"]},
+                "": ["name = react", "name = typescript"],
                 "version": ["18.0.0", "5.0.0"],
             }
         }
@@ -274,7 +278,11 @@ class TestAnonymousLists:
         assert result == expected
 
     def test_deeply_nested_lists(self):
-        """Test multiple levels of anonymous lists."""
+        """Test multiple levels of anonymous lists.
+
+        With first-split-only, ``= title = File`` splits at the first ``=``
+        giving key="" and value="title = File" (literal).
+        """
         content = """
         menu =
           = title = File
@@ -291,14 +299,19 @@ class TestAnonymousLists:
         result = kvl.loads(content)
         expected = {
             "menu": {
-                "": {"title": ["File", "Edit"]},
+                "": ["title = File", "title = Edit"],
                 "items": ["New", "Open", "Save", "Cut", "Copy", "Paste"],
             }
         }
         assert result == expected
 
     def test_list_items_with_nested_values(self):
-        """Test anonymous list items containing nested structures."""
+        """Test anonymous list items containing nested structures.
+
+        With first-split-only, ``= host = web1.example.com`` splits at
+        the first ``=`` giving key="" and value="host = web1.example.com"
+        (literal).
+        """
         content = """
         servers =
           = host = web1.example.com
@@ -313,7 +326,7 @@ class TestAnonymousLists:
         result = kvl.loads(content)
         expected = {
             "servers": {
-                "": {"host": ["web1.example.com", "web2.example.com"]},
+                "": ["host = web1.example.com", "host = web2.example.com"],
                 "config": {"memory": ["4GB", "8GB"], "cpu": ["2", "4"]},
             }
         }

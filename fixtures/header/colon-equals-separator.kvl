@@ -1,0 +1,5 @@
+#:= kvl 1.0
+name := John Doe
+port := 8080
+nested :=
+    host := localhost

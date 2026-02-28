@@ -112,20 +112,12 @@ tags = blue
 
 ### Go Feature Gaps
 - **No input size or recursion depth limits**
-- **Compact produces sorted lists** - Go map iteration is unordered, so repeated key order is lost in `Compact()`
 
-### Specification Updates Needed
-- Document categorical merge as correct behavior (not override)
-- Add two-tier API architecture (parse vs loads)
-- Clarify escape sequences (separator-only, other backslashes are literals)
-- Add tab/space indentation rules (no mixing)
-- Clarify boolean parsing is application-layer (not core spec)
-
-### Test Fixture Gaps
-- No escape sequence fixtures
-- No custom separator or header parsing fixtures
-- No list marker fixtures
-- Only 1 invalid fixture, 1 merge test pair
+### Remaining Work
+- Recursion depth enforcement for indentation nesting (Python, Zig, JS)
+- O(n²) merge performance (Zig hash index, JS in-place mutation)
+- Emacs input size/depth limits
+- Missing fixtures: empty key pattern, invalid fixtures, merge associativity, header options
 
 ## Conformance Testing
 
@@ -150,7 +142,7 @@ All 5 implementations (Python lib, Python CLI, Go, Zig, JavaScript) pass all con
 Each implementation has its own examples in `<impl>/examples/`.
 
 - Python: 111 passing tests
-- Go: 24 passing tests (API, compatibility, integration, benchmarks)
+- Go: 42 passing tests (API, compatibility, integration, benchmarks)
 - Zig: 14 passing tests (parser, merge, JSON output, escapes)
 - JavaScript: 111 passing tests
 

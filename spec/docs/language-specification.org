@@ -96,22 +96,26 @@ equation: x=y                 # Works - = doesn't need escaping with : separator
 
 *Escape Rules:*
 
-1. =\{separator}= → ={separator}= (backslash + separator produces literal separator)
-2. Only the current separator (defined in header) needs escaping
-3. Characters that aren't the separator never need escaping
-4. Backslash before non-separator characters is preserved literally
+1. =\{separator}= → ={separator}= (backslash immediately before separator produces literal separator)
+2. All other backslashes are literal characters — no doubling, no pair processing
+3. Only the current separator (defined in header) needs escaping
+4. Characters that aren't the separator never need escaping
 
-*Multiple Backslashes:*
-
-When backslashes appear before the separator, they are processed in pairs:
+*Backslash Examples:*
 
 #+begin_src kvl
-value = a\\=b      # Two backslashes: a\ followed by separator → "a\", key ends
-value = a\=b       # Result: "a=b" (escaped separator in value)
-value = a\\\=b     # Three backslashes: a\\ followed by escaped separator → "a\=b"
+value = a\=b       # \= → = (escape) → value is "a=b"
+path = C:\Users    # \ before U is literal → value is "C:\Users"
+value = a\\=b      # \\ are two literals, \= is escape → value is "a\=b"
+value = a\\\=y     # \\ are two literals, \= is escape → value is "a\\=y"
+a\\=b              # \ before = → escape → no separator → bare key "a\=b"
 #+end_src
 
-*Implementation Note:* Implementations should use a two-pass approach: first, find the unescaped separator to split key/value; second, unescape the separator in both key and value parts.
+*Separator Detection:* To find the unescaped separator, check if the character immediately before the separator is a backslash. If it is, the separator is escaped. No backslash counting or pair processing — a single backslash directly before the separator always means escape.
+
+*Implementation Note:* Implementations should use a two-pass approach: first, find the unescaped separator (using backslash counting) to split key/value; second, unescape by removing backslashes that immediately precede the separator character.
+
+*Consequence:* It is impossible to have a key ending in =\= with zero whitespace before the separator. In practice this is not an issue because KVL allows whitespace around the separator: =key\ = value= works fine.
 
 ** Whitespace and Indentation
 
@@ -119,9 +123,10 @@ value = a\\\=b     # Three backslashes: a\\ followed by escaped separator → "a
 
 1. *Indentation determines nesting level* - Increased indentation creates nested structures
 2. *Spaces and tabs* - Both are allowed for indentation
-3. *Tab equivalence* - One tab character equals 4 spaces for indentation purposes
-4. *Strict mode* - A file must use EITHER tabs OR spaces consistently, not both (mixing is a parse error in strict mode)
-5. *Value whitespace* - Leading/trailing whitespace in values is preserved
+3. *Dynamic indent widths* - Each nesting level's indent is determined by its first child relative to its parent (no fixed indent unit — 2 spaces, 4 spaces, tabs all valid)
+4. *Sibling consistency* - Children of the same parent must have matching indentation
+5. *Strict mode* - A file must use EITHER tabs OR spaces consistently, not both (mixing is a parse error in strict mode)
+6. *Value whitespace* - Leading and trailing whitespace in values is stripped
 
 #+begin_src kvl
 /= Using spaces (recommended)
@@ -183,6 +188,23 @@ name = John Doe
 port = 8080
 active = true
 #+end_src
+
+*** Inline Separator Splitting
+
+When a line contains multiple occurrences of the separator, only the *first* unescaped occurrence splits key from value. All subsequent separator characters are part of the value:
+
+#+begin_src kvl
+equation = 2 + 2 = 4
+/= key is "equation", value is "2 + 2 = 4"
+
+url = http://example.com?a=1&b=2
+/= key is "url", value is "http://example.com?a=1&b=2"
+
+config = key=value
+/= key is "config", value is "key=value"
+#+end_src
+
+This matches CCL behavior and ensures values containing the separator character can be written without escaping.
 
 ** Nested Objects
 
@@ -289,17 +311,82 @@ feature-flags =
 /= }
 #+end_src
 
+** Multiline Values
+
+Multiline values are handled by two-stage processing, matching CCL semantics:
+
+*** Stage 1: Parser Capture
+
+The parser captures an entire indented block as a raw string. Only indentation level matters — if a continuation line is indented deeper than the parent key, it is part of the value. The parser does NOT examine separator characters during this stage.
+
+*** Stage 2: Model Re-parse (Fix-point)
+
+The captured block is re-parsed as key-value pairs at the block's indentation level:
+- If *all* lines parse as =key {sep} value= → the block becomes a *nested structure*
+- If *any* line fails to parse → the entire block is a *plain text string*
+
+This is all-or-nothing: mixed blocks (some lines with separators, some without) are always plain text.
+
+*** Examples
+
+#+begin_src kvl
+/= Nested structure (all continuation lines have separator)
+server =
+    host = localhost
+    port = 8080
+/= → {server: {host: "localhost", port: "8080"}}
+
+/= Plain text (no continuation line has separator)
+description =
+    This is a long
+    description text
+/= → {description: "This is a long\ndescription text"}
+
+/= Plain text (one line lacks separator → entire block is text)
+notes =
+    line one
+    key = value
+/= → {notes: "line one\nkey = value"}
+#+end_src
+
+*** Whitespace Trimming
+
+The two API tiers handle multiline whitespace differently:
+
+- =parse()= (low-level): preserves raw whitespace including leading =\n= and absolute indentation
+- =loads()= (high-level): strips leading =\n= and dedents to the block's indentation level
+
+#+begin_src
+Raw parse() output:   "\n    This is a long\n    description text"
+Compacted loads():    "This is a long\ndescription text"
+#+end_src
+
+The leading newline and indentation are artifacts of the KVL file's nesting depth, not meaningful content.
+
+** Empty Files
+
+An empty file (or a file containing only whitespace/blank lines) is valid KVL and parses to an empty object:
+
+#+begin_src python
+kvl.parse("")   # Returns {}
+kvl.loads("")   # Returns {}
+#+end_src
+
+** Forbidden Separators
+
+Separator strings must contain at least one non-whitespace character. Whitespace-only separators are invalid because they would make parsing ambiguous — indentation and key boundaries would be indistinguishable.
+
 * Semantics
 
 ** Value Types
 
-KVL is dynamically typed with automatic inference in the standard API:
+All values are strings at the parse level. Type inference (converting strings to numbers, booleans, etc.) is an application-layer concern, not part of the core specification:
 
-- *Strings* - Default type, no quotes required: =name = John Doe=
-- *Numbers* - Integers and floats: =port = 8080=, =rate = 1.5=
-- *Booleans* - Canonical literals: =true= and =false=
-- *Objects* - Nested key-value structures
-- *Categorical* - Repeated key structures
+- *Strings* - All scalar values are strings: =name = John Doe=, =port = 8080=
+- *Objects* - Nested key-value structures (via indentation)
+- *Categorical* - Repeated key structures (nested mappings)
+
+Implementations MAY provide type inference in the high-level API (=loads()=) as a convenience, converting string values to numbers, booleans, etc. This is optional and application-layer — the core parse always returns strings.
 
 *** Boolean Value Parsing (Application Layer)
 
@@ -415,7 +502,10 @@ A conforming KVL implementation must:
 4. Implement proper indentation-based nesting
 5. Treat lines beginning with =/== as conventional keys (preserve in parsed structure)
 6. Parse header options using kebab-case format
-7. Implement escape sequence handling for separators (backslash before separator produces literal separator)
+7. Implement escape sequence handling (=\{sep}= → ={sep}=, all other backslashes literal)
+8. Split on first unescaped separator only (no recursive splitting)
+9. Return all scalar values as strings from the core parser
+10. Parse empty input to an empty object
 
 ** Optional Features
 
@@ -547,7 +637,7 @@ header        ::= '#' separator 'kvl' version list-markers? option*
 statement     ::= assignment | list-item | blank-line
 assignment    ::= key separator value?
 list-item     ::= INDENT list-marker SPACE value
-key           ::= key-char+ (excluding unescaped separator)
+key           ::= key-char* (excluding unescaped separator; empty keys allowed for list markers)
 key-char      ::= [^\n] | escaped-separator
 value         ::= simple-value | nested-object
 simple-value  ::= value-char*
@@ -570,12 +660,15 @@ SPACE         ::= ' ' | '\t'
 
 *Grammar Notes:*
 
-1. *Keys* can contain any characters except the unescaped separator and newlines
-2. *Escaped separators* (=\{sep}=) are treated as literal characters in keys and values
-3. *List markers* must be declared in the header and followed by exactly one space/tab
-4. *Options* use kebab-case (e.g., =space-before=false=) for readability
-5. *Comments* (lines starting with =/==) are parsed as regular keys in the =/== namespace
+1. *Keys* can contain any characters except the unescaped separator and newlines; empty keys are valid (used by list markers and empty-key syntax)
+2. *Escaped separators* (=\{sep}=) are treated as literal characters in keys and values; all other backslashes are literal
+3. *First split only* — only the first unescaped separator on a line splits key from value; subsequent separators are part of the value
+4. *List markers* must be declared in the header and followed by exactly one space/tab
+5. *Options* use kebab-case (e.g., =space-before=false=) for readability
+6. *Comments* (lines starting with =/==) are parsed as regular keys in the =/== namespace
+7. *Multiline values* — indented continuation blocks use two-stage processing (capture then re-parse)
+8. *Dynamic indentation* — indent width is determined by the first child at each level, not a fixed unit
 
 * Reference Implementation
 
-The Python implementation (py) serves as the reference implementation for this specification.
+The Python implementation (=python/=) serves as the reference implementation for this specification.

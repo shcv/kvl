@@ -298,24 +298,23 @@ def _is_list_marker(line: str, pos: int, config: KvlConfig) -> bool:
 
 
 def _find_unescaped_separator(line: str, separator: str) -> int:
-    """Find the first separator not preceded by backslashes.
+    """Find the first separator not immediately preceded by a backslash.
 
-    KVL extends CCL with escape sequences: backslash + separator escapes the separator.
-    This allows values to contain separator characters.
-
-    Examples:
-        "url = https\\://example.com" → key="url", value="https://example.com"
-        "equation = x\\=y+z" → key="equation", value="x=y+z"
+    Simple escape rule: a backslash directly before the separator escapes it.
+    No pair processing — ``\\=`` means the second backslash escapes the ``=``,
+    regardless of how many backslashes precede it.
     """
+    sep_len = len(separator)
     pos = 0
-    while pos < len(line):
+    while pos <= len(line) - sep_len:
         sep_pos = line.find(separator, pos)
         if sep_pos == -1:
             return -1
-        if sep_pos > 0 and line[sep_pos - 1] == "\\":
+        if sep_pos > 0 and line[sep_pos - 1] == '\\':
+            # Backslash immediately before separator = escaped
             pos = sep_pos + 1
-        else:
-            return sep_pos
+            continue
+        return sep_pos
     return -1
 
 
@@ -324,9 +323,13 @@ def _process_value(value: str, config: KvlConfig, depth: int = 0) -> Dict[str, A
     if not value or value.strip() == "":
         return {}
 
-    # Only parse as nested KVL if it contains separators or list markers
-    # Otherwise treat as literal value
-    has_separator = config.separator in value
+    # Only re-parse as nested KVL if the value is multiline (from indented
+    # blocks).  Single-line values are always literal leaves — they must NOT
+    # be re-split on the separator.
+    if '\n' not in value:
+        return {value: {}}
+
+    has_separator = _find_unescaped_separator(value, config.separator) != -1
     has_list_markers = config.list_markers and any(
         any(
             line.lstrip().startswith(marker + " ")
@@ -402,16 +405,30 @@ def _unescape_model(model, config: KvlConfig):
 
 def _unescape_text(text: str, separator: str) -> str:
     """Unescape separator patterns: backslash + separator → separator.
-    
-    Simple replacement that handles:
-    - \\<sep> → <sep> (escaped separator becomes literal separator)
-    - \\\\<sep> → \\<sep> (double backslash before sep becomes single backslash + sep)
-    - \\\\\\<sep> → \\\\<sep> (triple backslash becomes double backslash + sep)
-    
+
+    Scans left-to-right: a backslash immediately followed by the separator
+    is consumed as an escape (producing just the separator).  All other
+    backslashes are literal.
+
     Examples:
-        "x\\=y" with separator "=" → "x=y"
-        "x\\\\=y" with separator "=" → "x\\=y" 
-        "x\\\\\\=y" with separator "=" → "x\\\\=y"
+        "x\\=y"    with sep "=" → "x=y"
+        "x\\\\=y"  with sep "=" → "x\\=y"   (first \\ literal, second \\= → =)
+        "x\\\\\\=y" with sep "=" → "x\\\\=y"
     """
-    escaped_sep = "\\" + separator
-    return text.replace(escaped_sep, separator)
+    escaped = '\\' + separator
+    if escaped not in text:
+        return text
+
+    result = []
+    i = 0
+    sep_len = len(separator)
+    while i < len(text):
+        if (i < len(text) - sep_len
+                and text[i] == '\\'
+                and text[i + 1:i + 1 + sep_len] == separator):
+            result.append(separator)
+            i += 1 + sep_len
+        else:
+            result.append(text[i])
+            i += 1
+    return ''.join(result)

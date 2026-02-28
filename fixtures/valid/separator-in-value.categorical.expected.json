@@ -1,0 +1,11 @@
+{
+  "equation": {
+    "2 + 2 = 4": {}
+  },
+  "url": {
+    "http://example.com?a=1&b=2": {}
+  },
+  "config": {
+    "key=value": {}
+  }
+}

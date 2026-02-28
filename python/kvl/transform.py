@@ -144,8 +144,15 @@ def expand(data: Any) -> Any:
             result[key] = expand(value)
         return result
 
+    elif isinstance(data, str):
+        # Strings with newlines are multiline text values, not categorical
+        if "\n" in data:
+            return data
+        # Simple strings convert to categorical format
+        return {data: {}}
+
     else:
-        # Primitive values (strings, numbers, etc.) convert to categorical format
+        # Other primitive values convert to categorical format
         if data is None:
             return {}
         else:

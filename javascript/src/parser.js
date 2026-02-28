@@ -287,21 +287,28 @@ function _isListMarker(line, pos, config) {
 }
 
 /**
- * Find the first separator not preceded by a backslash.
+ * Find the first separator not immediately preceded by a backslash.
+ *
+ * Simple escape rule: a backslash directly before the separator escapes it.
+ * No pair processing — \\= means the second backslash escapes the =,
+ * regardless of how many backslashes precede it.
+ *
  * @param {string} line
  * @param {string} separator
  * @returns {number} index or -1
  */
 function _findUnescapedSeparator(line, separator) {
+  const sepLen = separator.length;
   let pos = 0;
-  while (pos < line.length) {
+  while (pos <= line.length - sepLen) {
     const sepPos = line.indexOf(separator, pos);
     if (sepPos === -1) return -1;
     if (sepPos > 0 && line[sepPos - 1] === '\\') {
+      // Backslash immediately before separator = escaped
       pos = sepPos + 1;
-    } else {
-      return sepPos;
+      continue;
     }
+    return sepPos;
   }
   return -1;
 }
@@ -316,7 +323,14 @@ function _findUnescapedSeparator(line, separator) {
 function _processValue(value, config, depth = 0) {
   if (!value || !value.trim()) return {};
 
-  const hasSeparator = value.includes(config.separator);
+  // Only re-parse as nested KVL if the value is multiline (from indented
+  // blocks).  Single-line values are always literal leaves — they must NOT
+  // be re-split on the separator.
+  if (!value.includes('\n')) {
+    return { [value]: {} };
+  }
+
+  const hasSeparator = _findUnescapedSeparator(value, config.separator) !== -1;
   const hasListMarkers = config.listMarkers && value.split('\n').some(line => {
     const trimmed = line.trimStart();
     return config.listMarkers.split('').some(
@@ -406,10 +420,30 @@ function _unescapeModel(model, config) {
 
 /**
  * Unescape separator patterns: \<sep> → <sep>.
+ * Scans left-to-right: a backslash immediately followed by the separator
+ * is consumed as an escape (producing just the separator).  All other
+ * backslashes are literal.
  * @param {string} text
  * @param {string} separator
  * @returns {string}
  */
 function _unescapeText(text, separator) {
-  return text.replaceAll('\\' + separator, separator);
+  const escaped = '\\' + separator;
+  if (!text.includes(escaped)) return text;
+
+  const parts = [];
+  const sepLen = separator.length;
+  let i = 0;
+  while (i < text.length) {
+    if (i < text.length - sepLen
+        && text[i] === '\\'
+        && text.slice(i + 1, i + 1 + sepLen) === separator) {
+      parts.push(separator);
+      i += 1 + sepLen;
+    } else {
+      parts.push(text[i]);
+      i++;
+    }
+  }
+  return parts.join('');
 }
