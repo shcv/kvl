@@ -1,0 +1,124 @@
+[
+  {
+    "type": "document",
+    "named": true,
+    "root": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "comment",
+          "named": true
+        },
+        {
+          "type": "continuation",
+          "named": true
+        },
+        {
+          "type": "header",
+          "named": true
+        },
+        {
+          "type": "list_item",
+          "named": true
+        },
+        {
+          "type": "pair",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "list_item",
+    "named": true,
+    "fields": {
+      "marker": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "list_marker",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "value",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "pair",
+    "named": true,
+    "fields": {
+      "key": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "key",
+            "named": true
+          }
+        ]
+      },
+      "separator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "separator",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "value",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "comment",
+    "named": true
+  },
+  {
+    "type": "continuation",
+    "named": true
+  },
+  {
+    "type": "header",
+    "named": true
+  },
+  {
+    "type": "key",
+    "named": true
+  },
+  {
+    "type": "list_marker",
+    "named": true
+  },
+  {
+    "type": "separator",
+    "named": true
+  },
+  {
+    "type": "value",
+    "named": true
+  }
+]

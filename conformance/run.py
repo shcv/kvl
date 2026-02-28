@@ -61,13 +61,13 @@ IMPLEMENTATIONS = {
     },
     "go": {
         "name": "Go",
-        "features": {"parse", "categorical", "merge", "serialize"},
+        "features": {"parse", "categorical", "merge", "serialize", "header"},
         "description": "Go implementation",
     },
     "zig": {
         "name": "Zig",
-        "features": {"parse"},
-        "description": "Zig implementation (minimal)",
+        "features": {"parse", "categorical", "merge", "serialize", "header"},
+        "description": "Zig implementation",
     },
     "javascript": {
         "name": "JavaScript",
@@ -370,7 +370,7 @@ def get_parse_cmd(impl_key: str, kvl_path: Path) -> Tuple[Optional[Any], Optiona
     elif impl_key == "go":
         return _run_cli([str(GO_DIR / "kvl"), "parse", str(kvl_path)])
     elif impl_key == "zig":
-        return _run_cli([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "parse-json", str(kvl_path)])
+        return _run_cli([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "parse", str(kvl_path)])
     elif impl_key == "javascript":
         return _run_cli(["node", str(JS_DIR / "src" / "cli.js"), "parse", str(kvl_path)])
     return None, "Unknown implementation"
@@ -383,6 +383,8 @@ def get_parse_raw_cmd(impl_key: str, kvl_path: Path) -> Tuple[Optional[Any], Opt
         return _run_cli([sys.executable, "-m", "kvl", "parse-raw", str(kvl_path)], timeout=30, cwd=str(PYTHON_DIR))
     elif impl_key == "go":
         return _run_cli([str(GO_DIR / "kvl"), "parse-raw", str(kvl_path)])
+    elif impl_key == "zig":
+        return _run_cli([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "parse-raw", str(kvl_path)])
     elif impl_key == "javascript":
         return _run_cli(["node", str(JS_DIR / "src" / "cli.js"), "parse-raw", str(kvl_path)])
     return None, "Not supported"
@@ -395,6 +397,8 @@ def get_merge_cmd(impl_key: str, base_path: Path, overlay_path: Path) -> Tuple[O
         return _run_cli([sys.executable, "-m", "kvl", "merge", str(base_path), str(overlay_path)], timeout=30, cwd=str(PYTHON_DIR))
     elif impl_key == "go":
         return _run_cli([str(GO_DIR / "kvl"), "merge", str(base_path), str(overlay_path)])
+    elif impl_key == "zig":
+        return _run_cli([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "merge", str(base_path), str(overlay_path)])
     elif impl_key == "javascript":
         return _run_cli(["node", str(JS_DIR / "src" / "cli.js"), "merge", str(base_path), str(overlay_path)])
     return None, "Not supported"
@@ -408,6 +412,8 @@ def get_serialize_cmd(impl_key: str, data: Any) -> Tuple[Optional[str], Optional
         return _run_cli_raw([sys.executable, "-m", "kvl", "serialize"], stdin_data=json_str, timeout=30, cwd=str(PYTHON_DIR))
     elif impl_key == "go":
         return _run_cli_raw([str(GO_DIR / "kvl"), "serialize"], stdin_data=json_str)
+    elif impl_key == "zig":
+        return _run_cli_raw([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "serialize"], stdin_data=json_str)
     elif impl_key == "javascript":
         return _run_cli_raw(["node", str(JS_DIR / "src" / "cli.js"), "serialize"], stdin_data=json_str)
     return None, "Not supported"
@@ -421,7 +427,7 @@ def get_expect_fail_cmd(impl_key: str, kvl_path: Path) -> Tuple[bool, str]:
     elif impl_key == "go":
         return _run_cli_expect_fail([str(GO_DIR / "kvl"), "parse", str(kvl_path)])
     elif impl_key == "zig":
-        return _run_cli_expect_fail([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "parse-json", str(kvl_path)])
+        return _run_cli_expect_fail([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "parse", str(kvl_path)])
     elif impl_key == "javascript":
         return _run_cli_expect_fail(["node", str(JS_DIR / "src" / "cli.js"), "parse", str(kvl_path)])
     return False, "Unknown implementation"

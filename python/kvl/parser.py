@@ -56,6 +56,7 @@ def parse(text: str, config: Optional[KvlConfig] = None) -> Dict[str, Any]:
     """
     if len(text) > MAX_INPUT_SIZE:
         raise KvlParseError(f"Input exceeds maximum size of {MAX_INPUT_SIZE} bytes")
+    _check_indent_consistency(text)
     config = ensure_config(config, lambda: parse_header(text) or KvlConfig())
     key_vals = keyvals(text, config)
     model = _build_model(key_vals, config)
@@ -100,6 +101,37 @@ def load(
     """Parse KVL from a file or file path."""
     text = handle_read(file_or_path)
     return loads(text, config)
+
+
+def _check_indent_consistency(text: str) -> None:
+    """Verify that indentation uses only tabs or only spaces, not both.
+
+    The first indented line determines the indent mode. Subsequent indented
+    lines must use the same character. Raises KvlParseError if mixed.
+    """
+    indent_char = None
+    for line_num, line in enumerate(text.splitlines(), 1):
+        if not line or not line[0] in (' ', '\t'):
+            continue
+        # Extract leading whitespace
+        leading = ""
+        for ch in line:
+            if ch in (' ', '\t'):
+                leading += ch
+            else:
+                break
+        if not leading:
+            continue
+        if indent_char is None:
+            indent_char = leading[0]
+        for col, ch in enumerate(leading):
+            if ch != indent_char:
+                expected = "tabs" if indent_char == '\t' else "spaces"
+                found = "tab" if ch == '\t' else "space"
+                raise KvlParseError(
+                    f"Mixed indentation: expected {expected} but found {found}",
+                    line=line_num, column=col + 1
+                )
 
 
 def _collect_multiline_value(

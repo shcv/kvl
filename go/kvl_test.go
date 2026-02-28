@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -440,8 +441,13 @@ func TestEmptyValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	if v := result["key"]; v != "" {
-		t.Errorf("empty value: got %q, want empty string", v)
+	// Empty value with no children produces {} (empty object)
+	v, ok := result["key"].(map[string]any)
+	if !ok {
+		t.Fatalf("empty value should be map[string]any{}, got %T: %v", result["key"], result["key"])
+	}
+	if len(v) != 0 {
+		t.Errorf("empty value should be empty map, got %v", v)
 	}
 }
 
@@ -572,6 +578,155 @@ func TestArrowSeparator(t *testing.T) {
 	}
 	if v := result["port"]; v != "8080" {
 		t.Errorf("port: got %q, want %q", v, "8080")
+	}
+}
+
+// --- Multiline value tests ---
+
+func TestMultilineValue(t *testing.T) {
+	input := "description =\n    This is a long\n    description that spans\n    multiple lines\nname = test\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	expected := "\n    This is a long\n    description that spans\n    multiple lines"
+	if v := result["description"]; v != expected {
+		t.Errorf("description: got %q, want %q", v, expected)
+	}
+	if v := result["name"]; v != "test" {
+		t.Errorf("name: got %q, want %q", v, "test")
+	}
+}
+
+// --- Input size limit test ---
+
+func TestInputSizeLimit(t *testing.T) {
+	// Create input just over 10MB
+	big := make([]byte, 10*1024*1024+1)
+	for i := range big {
+		big[i] = 'x'
+	}
+	_, err := Loads(string(big))
+	if err == nil {
+		t.Error("expected error for oversized input")
+	}
+}
+
+// --- Recursion depth limit test ---
+
+func TestRecursionDepthLimit(t *testing.T) {
+	// Build deeply nested KVL
+	var b strings.Builder
+	for i := 0; i < 150; i++ {
+		indent := strings.Repeat("    ", i)
+		b.WriteString(indent + "key =\n")
+	}
+	_, err := Loads(b.String())
+	if err == nil {
+		t.Error("expected error for deep nesting")
+	}
+}
+
+// --- Strict indentation tests ---
+
+func TestMixedIndentation(t *testing.T) {
+	// Mix tabs and spaces in same file
+	input := "a =\n    b = 1\n\tc = 2\n"
+	_, err := Loads(input)
+	if err == nil {
+		t.Error("expected error for mixed tabs and spaces")
+	}
+}
+
+// --- Edge fixture tests ---
+
+func TestEdgeEmptyValues(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "empty-values")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeMultiline(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "multiline")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeUnicode(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "unicode")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeWhitespace(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "whitespace-in-values")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+// --- Header fixture tests ---
+
+func TestHeaderColonSeparator(t *testing.T) {
+	kvlText, expected := loadFixture(t, "header", "colon-separator")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestHeaderArrowSeparator(t *testing.T) {
+	kvlText, expected := loadFixture(t, "header", "arrow-separator")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestHeaderListMarkerDash(t *testing.T) {
+	kvlText, expected := loadFixture(t, "header", "list-marker-dash")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestHeaderListMarkerMulti(t *testing.T) {
+	kvlText, expected := loadFixture(t, "header", "list-marker-multi")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
 	}
 }
 

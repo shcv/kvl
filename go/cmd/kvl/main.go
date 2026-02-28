@@ -130,22 +130,13 @@ func cmdMerge() {
 		os.Exit(1)
 	}
 
-	parsed1, err := kvl.ParseString(string(data1))
+	result, err := kvl.LoadsMerge(string(data1), string(data2))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error parsing %s: %v\n", path1, err)
+		fmt.Fprintf(os.Stderr, "error merging: %v\n", err)
 		os.Exit(1)
 	}
 
-	parsed2, err := kvl.ParseString(string(data2))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error parsing %s: %v\n", path2, err)
-		os.Exit(1)
-	}
-
-	merged := kvl.Merge(parsed1, parsed2)
-	compacted := kvl.Compact(merged)
-
-	output, err := json.MarshalIndent(compacted, "", "  ")
+	output, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error encoding JSON: %v\n", err)
 		os.Exit(1)

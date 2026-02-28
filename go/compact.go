@@ -1,9 +1,10 @@
 package kvl
 
-import "sort"
-
 // compactMap converts a categorical map to compacted form.
-// Maps where all values are empty maps become sorted []string or plain string.
+// Maps where all values are empty maps become []string or plain string.
+// Note: Since Go maps are unordered, list order from Compact() on a
+// map[string]any is non-deterministic. Use Loads() for order-preserving
+// parsing, which uses the node tree's insertion order.
 func compactMap(data map[string]any) map[string]any {
 	result := make(map[string]any, len(data))
 	for k, v := range data {
@@ -33,7 +34,6 @@ func compactValue(v any) any {
 		for k := range m {
 			keys = append(keys, k)
 		}
-		sort.Strings(keys)
 		return keys
 	}
 

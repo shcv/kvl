@@ -63,17 +63,14 @@ func Loads(text string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	result := root.toCompacted()
-	if m, ok := result.(map[string]any); ok {
-		return m, nil
-	}
-	return map[string]any{}, nil
+	return root.toCompactedMap(), nil
 }
 
 // Compact converts a categorical map[string]any to a compacted form.
 // Categorical structures (maps where all values are empty maps) become
-// sorted []string lists. Single-entry categoricals become plain strings.
-// Since Go maps are unordered, list order is alphabetical.
+// []string lists. Single-entry categoricals become plain strings.
+// Note: Since Go maps are unordered, list element order from Compact()
+// is non-deterministic. Use Loads() for order-preserving parsing.
 func Compact(data map[string]any) map[string]any {
 	return compactMap(data)
 }
@@ -87,8 +84,25 @@ func Expand(data map[string]any) map[string]any {
 // Merge performs an associative merge of two categorical maps.
 // Both maps are merged recursively: matching keys have their children merged.
 // Merge(Merge(A, B), C) == Merge(A, Merge(B, C))
+// Note: Since Go maps are unordered, the result order is non-deterministic.
+// Use LoadsMerge for order-preserving merge with compacted output.
 func Merge(a, b map[string]any) map[string]any {
 	return mergeMap(a, b)
+}
+
+// LoadsMerge parses two KVL texts, merges them, and returns a compacted
+// result preserving insertion order (from the node tree, not Go maps).
+func LoadsMerge(text1, text2 string) (map[string]any, error) {
+	root1, _, err := parse(text1)
+	if err != nil {
+		return nil, err
+	}
+	root2, _, err := parse(text2)
+	if err != nil {
+		return nil, err
+	}
+	root1.mergeFrom(root2)
+	return root1.toCompactedMap(), nil
 }
 
 // Marshal serializes a map[string]any to KVL text using the default separator "=".

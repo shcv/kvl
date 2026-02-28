@@ -1,0 +1,176 @@
+#+TITLE: KVL Next Steps
+
+Decisions and planned work from the deep review (2026-02-27).
+
+* Decided: Spec Clarifications
+
+** Escape sequences: simple rule, no pair processing
+- =\{sep}= → ={sep}=. That's the only escape.
+- All other =\= are literal characters.
+- No pair processing, no doubling, no recursion.
+- Consequence: nested KVL values need one escape per nesting level.
+- Consequence: impossible to have a key ending in =\= with zero whitespace before the separator, but whitespace separation makes this unnecessary in practice.
+
+** Inline separator splitting: first occurrence only
+- =a = b = c= → key =a=, value =b = c=
+- Matches CCL behavior (confirmed from OCaml source and test suite)
+- Python and JavaScript currently recursively split — this is a bug to fix
+- Go and Zig already do first-split-only correctly
+
+** No type inference in core spec
+- All values are strings at the parse level
+- Type inference is application-layer, not part of =loads()=
+- Schemas can declare types when validation is needed
+- Update spec to remove claims about "automatic inference" in standard API
+
+** Empty files parse to ={}=
+- Zero statements is valid per the grammar
+- =parse("")= and =loads("")= both return empty dict/object
+
+** Indentation levels are dynamic
+- Each level's indent is determined by its first child relative to its parent
+- No fixed indent unit — 2 spaces, 4 spaces, tabs all valid
+- Only constraint: children must be indented more than parent, siblings must match
+
+** Ordering and duplicates
+- Categorical merge is set-based: =A + B = B + A= as sets
+- Ordering in output is implementation-defined (use OrderedDict for determinism)
+- Duplicates are inherently lost: =tags = red; tags = red= → ={tags: {red: {}}}=
+- Applications needing ordered lists or duplicates should use numbered keys
+
+** Multiline value semantics (matches CCL)
+Two-stage processing, same as CCL:
+
+1. *Parser stage*: capture the entire indented block as a raw string.
+   Only indentation level matters — if a continuation line is indented
+   deeper than the parent, it's part of the value. The parser does NOT
+   look at separator characters during this stage.
+
+2. *Model stage (fix-point)*: try to re-parse the captured string as
+   key-value pairs. If ALL lines parse as =key = value= at the block's
+   indentation level → nested structure. If ANY line fails to parse →
+   entire block is a plain text string. All-or-nothing.
+
+Examples:
+#+begin_src kvl
+/= Nested (all continuation lines have separator)
+server =
+    host = localhost
+    port = 8080
+/= → {server: {host: "localhost", port: "8080"}}
+
+/= Plain text (no continuation line has separator)
+description =
+    This is a long
+    description text
+/= → {description: "This is a long\ndescription text"}
+
+/= Plain text (one line lacks separator → entire block is text)
+notes =
+    line one
+    key = value
+/= → {notes: "line one\nkey = value"}
+#+end_src
+
+** Multiline value whitespace trimming
+- =parse()= (low-level): preserves raw whitespace including leading =\n= and absolute indentation
+- =loads()= (high-level): strips leading =\n=, dedents to the block's indentation level
+
+#+begin_src
+Raw parse() output:   "\n    This is a long\n    description text"
+Compacted loads():    "This is a long\ndescription text"
+#+end_src
+
+Rationale: the leading newline and indentation are artifacts of the KVL
+file's nesting depth, never meaningful content. Even embedded code or
+scripts should be relative to the block, not absolute. No use case
+exists for preserving the raw indentation in the high-level API; apps
+that need it can use =parse()=.
+
+** Comment handling
+- =/== comments leak into parsed data by design (preserves comments for round-trip)
+- Higher-level interfaces should support stripping comments before returning
+- Mechanism: comment key declaration in header + argument to =loads()= + utility function
+- Raw =parse()= always preserves comments
+
+* Decided: New Features
+
+** Comment stripping API
+- Header option to declare comment keys (default: =/==)
+- =loads()= parameter to strip comments before returning
+- Standalone utility function to strip comments from parsed data
+- Available across all implementations
+
+** Merge policy helpers
+- Helper functions for common policies: first-wins, last-wins, choice
+- Arguments to =compact()= or separate utility functions
+- Documentation explaining the pattern and rationale
+- Categorical merge is correct foundation; policies are app-level convenience
+
+** Numbered keys to arrays (schema level)
+- Schema can declare =items = array(start=0)= or =array(start=1)=
+- Numbered keys compact to arrays at schema validation level
+- Policy for gaps: fill with default, error, or sparse
+- Natural extension of schema system, no new syntax needed
+
+* TODO: Implementation Fixes
+
+** Python and JavaScript: stop recursive =\== splitting
+- =a = b = c= must produce ={a: "b = c"}=, not ={a: {b: "c"}}=
+- Match CCL behavior and Go/Zig implementations
+
+** Python and JavaScript: fix multiline serialization
+- Serializers cannot serialize values containing =\n=
+- Go and Zig serializers handle this correctly — use as reference
+
+** Fix escape sequence handling everywhere
+- Remove pair processing from any implementation that has it
+- Rule: =\{sep}= → ={sep}=, all other =\= literal
+- Update =escape/backslash-decrement= fixture expected outputs
+
+** Fix list-marker categorical fixtures
+- =header/list-marker-dash.categorical.expected.json= uses arrays — should be dicts
+- =header/list-marker-multi.categorical.expected.json= same issue
+
+** Go-specific fixes
+- CRLF: strip =\r= from line endings
+- Whitespace: strip all leading/trailing whitespace from values
+- Empty value compaction: ={key:{}}= should compact to string
+
+** Zig-specific fixes
+- Remove =---= as header separator recognition
+
+** Recursion depth enforcement
+- Python, Zig, JavaScript: enforce 100-level limit for indentation nesting, not just value parsing
+- Go already does this correctly
+
+** Zig and JavaScript: O(n^2) merge performance
+- Zig: add hash index to OrderedMap for O(1) key lookup
+- JavaScript: mutate in-place instead of spread copy in merge
+
+** Emacs
+- Add input size limit (10MB)
+- Add recursion depth limit
+
+* TODO: Missing Fixtures
+See =review-findings.org= for the full list of 22 gaps.
+
+Priority fixtures to add:
+1. =:== separator
+2. Empty key pattern (== value=)
+3. Unescaped === in values (=key = x = y=) — critical given the first-split decision
+4. More invalid fixtures (missing separator, bad header, marker edge cases)
+5. Merge associativity (3-way)
+6. Header options
+
+* TODO: Spec Updates
+- Add multiline value section: two-stage processing, all-or-nothing re-parse, whitespace trimming in loads()
+- Remove type inference claims from standard API description
+- Document forbidden separators (whitespace only)
+- Fix grammar: =key ::= key-char*= (allow empty keys for list markers)
+- Add comment stripping API to implementation guide
+- Add merge policy helpers to implementation guide
+- Clarify backslash escaping: simple rule, no pair processing
+- Clarify first-separator-only splitting
+- Document empty file behavior
+- Document dynamic indentation levels

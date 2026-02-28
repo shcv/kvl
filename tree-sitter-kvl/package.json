@@ -1,0 +1,32 @@
+{
+  "name": "tree-sitter-kvl",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for KVL (Key-Value Language)",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "kvl",
+    "configuration"
+  ],
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.kvl",
+      "file-types": [
+        "kvl"
+      ],
+      "highlights": "queries/highlights.scm",
+      "indents": "queries/indents.scm"
+    }
+  ],
+  "devDependencies": {
+    "tree-sitter-cli": "^0.26.6"
+  }
+}

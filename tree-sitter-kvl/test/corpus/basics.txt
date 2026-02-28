@@ -1,0 +1,282 @@
+================================================================================
+Simple key-value pairs
+================================================================================
+
+name = Alice
+age = 30
+active = true
+
+--------------------------------------------------------------------------------
+
+(document
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Nested objects
+================================================================================
+
+server =
+    host = localhost
+    port = 8080
+
+--------------------------------------------------------------------------------
+
+(document
+  (pair
+    key: (key)
+    separator: (separator))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Comments
+================================================================================
+
+/= This is a comment
+name = test
+/= Another comment
+
+--------------------------------------------------------------------------------
+
+(document
+  (comment)
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (comment))
+
+================================================================================
+Header with default separator
+================================================================================
+
+#= kvl 1.0
+name = value
+
+--------------------------------------------------------------------------------
+
+(document
+  (header)
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Header with colon separator
+================================================================================
+
+#: kvl 1.0
+host: localhost
+port: 8080
+
+--------------------------------------------------------------------------------
+
+(document
+  (header)
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Header with arrow separator
+================================================================================
+
+#-> kvl 1.0
+name -> John
+age -> 30
+
+--------------------------------------------------------------------------------
+
+(document
+  (header)
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+List markers
+================================================================================
+
+#= kvl 1.0 -
+colors =
+    - red
+    - green
+    - blue
+
+--------------------------------------------------------------------------------
+
+(document
+  (header)
+  (pair
+    key: (key)
+    separator: (separator))
+  (list_item
+    marker: (list_marker)
+    value: (value))
+  (list_item
+    marker: (list_marker)
+    value: (value))
+  (list_item
+    marker: (list_marker)
+    value: (value)))
+
+================================================================================
+Repeated keys (categorical)
+================================================================================
+
+tags = web
+tags = api
+tags = production
+
+--------------------------------------------------------------------------------
+
+(document
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Empty values
+================================================================================
+
+section =
+empty_key =
+with_value = hello
+
+--------------------------------------------------------------------------------
+
+(document
+  (pair
+    key: (key)
+    separator: (separator))
+  (pair
+    key: (key)
+    separator: (separator))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Multiline values
+================================================================================
+
+description =
+    This is a long
+    description text
+name = test
+
+--------------------------------------------------------------------------------
+
+(document
+  (pair
+    key: (key)
+    separator: (separator))
+  (continuation)
+  (continuation)
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Values with spaces
+================================================================================
+
+name = John Doe
+city = New York
+company = Acme Corp
+
+--------------------------------------------------------------------------------
+
+(document
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Deep nesting
+================================================================================
+
+server =
+    config =
+        timeout = 30
+        retries = 3
+
+--------------------------------------------------------------------------------
+
+(document
+  (pair
+    key: (key)
+    separator: (separator))
+  (pair
+    key: (key)
+    separator: (separator))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value))
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))
+
+================================================================================
+Escape in value
+================================================================================
+
+equation = x\=y+z
+
+--------------------------------------------------------------------------------
+
+(document
+  (pair
+    key: (key)
+    separator: (separator)
+    value: (value)))

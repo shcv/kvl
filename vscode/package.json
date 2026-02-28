@@ -1,0 +1,52 @@
+{
+  "name": "kvl",
+  "displayName": "KVL - Key-Value Language",
+  "description": "Syntax highlighting, snippets, and editing support for KVL configuration files",
+  "version": "1.0.0",
+  "publisher": "kvl-lang",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "kvl",
+    "configuration",
+    "key-value",
+    "config"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kvl-lang/kvl"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "kvl",
+        "aliases": [
+          "KVL",
+          "Key-Value Language"
+        ],
+        "extensions": [
+          ".kvl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "kvl",
+        "scopeName": "source.kvl",
+        "path": "./syntaxes/kvl.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "kvl",
+        "path": "./snippets/kvl.json"
+      }
+    ]
+  }
+}

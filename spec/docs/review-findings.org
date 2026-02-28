@@ -1,0 +1,86 @@
+#+TITLE: Deep Review Findings (2026-02-27)
+
+Items to revisit from the 6-agent deep review of spec and implementations.
+
+* Implementation Bugs
+
+** Go
+- CRLF: does not strip =\r= from line endings; =\r= embeds in values
+- Whitespace: strips only 1 space after separator; should strip all leading/trailing
+- Empty value compaction: ={key:{}}= should compact to string, not stay as object
+- Indentation: treats deeper indent after valued key as continuation instead of nesting
+
+** Zig
+- =---= handling: treats as header separator; should be regular key-value
+- O(n^2) merge performance: =OrderedMap.findIndex()= is linear scan; add hash index
+
+** JavaScript
+- O(n^2) merge performance: =merge()= uses spread copy; mutate in-place or add hash index
+
+** Python and JavaScript
+- Serializers cannot serialize multiline values (values containing =\n=)
+- Go and Zig serializers handle this correctly
+
+** Python, Zig, JavaScript
+- Recursion depth limit (100) only enforced for value parsing, not indentation nesting
+- Go correctly enforces it for both
+
+** Emacs
+- No input size limit (should be 10MB)
+- No recursion depth limit (relies on Emacs =max-lisp-eval-depth=)
+
+* Fixture Issues
+
+** Wrong categorical outputs
+- =header/list-marker-dash.categorical.expected.json= uses array format instead of dict
+- =header/list-marker-multi.categorical.expected.json= same issue
+- Categorical output should always be nested dicts, never arrays
+
+** Backslash-decrement spec/fixture disagreement
+- =escape/backslash-decrement= line 3: =three = x\\\=y=
+- Fixture expects =x\\=y= (two backslashes)
+- Spec example says =a\\\=b= produces =a\=b= (one backslash)
+- Need to resolve which interpretation is correct (see pair processing)
+
+* Missing Fixtures (22 gaps found)
+
+** Critical
+- =:== separator (standard, zero tests)
+- Empty key pattern (== value=)
+- Unescaped === in values (=key = x = y=)
+- Custom separator beyond standard set
+- Merge associativity verification (3-way merge)
+
+** Important
+- Header options (=space-before=false=, =compact=true=, etc.)
+- Tab-based indentation
+- Strict indent mode header options (=indent=tabs=, =indent=spaces=)
+- Nested list markers
+- Separator-on-same-line-as-list-marker rejection
+- Missing-separator error detection
+- Malformed header error detection
+- End-of-line non-comment verification (=key = value # not a comment=)
+- Backslash literal (=C:\Windows\System32=)
+- Escape with non-default separator
+- Deeply nested objects (5+ levels)
+- Blank line handling
+- Leading/trailing key whitespace
+- Left identity merge (empty base)
+- Categorical union merge (overlapping repeated keys)
+
+* Cross-Implementation Divergences
+
+** Inline === splitting (SPEC DECISION NEEDED)
+- Python/JS: =a = b = c= produces ={a:{b:"c"}}= (recursive split)
+- Go/Zig: =a = b = c= produces ={a:"b = c"}= (first split only)
+- Spec decision: first split only is correct
+
+** =\\== tokenization (SPEC CLARIFICATION NEEDED)
+- In string =x\\=y=: Go sees =\\= as pair producing =\=, then === as separator
+- Python/JS/Zig see =\= before === as escape, preceding =\= as literal
+- Matters for round-trip of values containing literal =\==
+
+* Editor Modes
+- Tree-sitter grammar created but not yet tested with actual editors
+- VS Code extension JSON files validated but not tested in VS Code
+- Vim plugin not tested in Vim

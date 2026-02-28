@@ -1,12 +1,32 @@
 package kvl
 
 import (
+	"fmt"
 	"strings"
+)
+
+// Security limits
+const (
+	maxInputSize      = 10 * 1024 * 1024 // 10MB
+	maxRecursionDepth = 100
+)
+
+// indentMode tracks whether a file uses tabs or spaces for indentation.
+type indentMode int
+
+const (
+	indentUnknown indentMode = iota
+	indentSpaces
+	indentTabs
 )
 
 // parse is the main entry point for parsing KVL text.
 // Returns the root node and the config parsed from any header.
 func parse(text string) (*node, Config, error) {
+	if len(text) > maxInputSize {
+		return nil, Config{}, fmt.Errorf("input exceeds maximum size of %d bytes", maxInputSize)
+	}
+
 	lines := strings.Split(text, "\n")
 	cfg := DefaultConfig()
 
@@ -19,7 +39,8 @@ func parse(text string) (*node, Config, error) {
 	}
 
 	root := newNode()
-	_, err := buildTree(root, lines, startLine, -1, cfg)
+	mode := indentUnknown
+	_, _, err := buildTree(root, lines, startLine, -1, cfg, &mode, 0)
 	if err != nil {
 		return nil, cfg, err
 	}
@@ -28,10 +49,91 @@ func parse(text string) (*node, Config, error) {
 	return root, cfg, nil
 }
 
+// indentedBlockHasSeparator checks whether the indented block starting at
+// startLine (with indentation > parentIndent) contains any lines with
+// unescaped separators. This is used to distinguish multiline value
+// continuation from nested key-value pairs.
+func indentedBlockHasSeparator(lines []string, startLine, parentIndent int, cfg Config, mode *indentMode) bool {
+	for i := startLine; i < len(lines); i++ {
+		line := lines[i]
+		if isBlank(line) {
+			continue
+		}
+		indent, err := measureIndentNoEnforce(line)
+		if err != nil || indent <= parentIndent {
+			break
+		}
+		content := strings.TrimLeft(line, " \t")
+		// Check for list markers
+		if cfg.ListMarkers != "" && len(content) >= 2 {
+			for _, marker := range cfg.ListMarkers {
+				if rune(content[0]) == marker && (content[1] == ' ' || content[1] == '\t') {
+					return true
+				}
+			}
+		}
+		if findUnescapedSep(content, cfg.Separator) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// collectMultilineBlock collects all indented lines after a key with empty
+// value as a single multiline string. Returns the value and next line index.
+func collectMultilineBlock(lines []string, startLine, parentIndent int, mode *indentMode) (string, int) {
+	var parts []string
+	i := startLine
+
+	for i < len(lines) {
+		line := lines[i]
+		if isBlank(line) {
+			// Peek ahead: if there are more indented lines after blank, include blank
+			j := i + 1
+			for j < len(lines) && isBlank(lines[j]) {
+				j++
+			}
+			if j < len(lines) {
+				nextIndent, err := measureIndentNoEnforce(lines[j])
+				if err == nil && nextIndent > parentIndent {
+					for k := i; k < j; k++ {
+						parts = append(parts, lines[k])
+					}
+					i = j
+					continue
+				}
+			}
+			break
+		}
+		indent, err := measureIndentNoEnforce(line)
+		if err != nil || indent <= parentIndent {
+			break
+		}
+		parts = append(parts, line)
+		i++
+	}
+
+	if len(parts) == 0 {
+		return "", startLine
+	}
+
+	// Build multiline value with leading newline (matches Python behavior)
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteByte('\n')
+		b.WriteString(p)
+	}
+	return b.String(), i
+}
+
 // buildTree recursively builds the node tree from lines.
 // parentIndent is the indentation level of the parent block (-1 for root).
-// Returns the next line index to process.
-func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Config) (int, error) {
+// Returns the next line index to process and the updated indent mode.
+func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Config, mode *indentMode, depth int) (int, indentMode, error) {
+	if depth > maxRecursionDepth {
+		return 0, *mode, &ParseError{Line: startLine + 1, Message: fmt.Sprintf("maximum nesting depth of %d exceeded", maxRecursionDepth)}
+	}
+
 	blockIndent := -1
 	i := startLine
 
@@ -44,28 +146,24 @@ func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Co
 			continue
 		}
 
-		indent, err := measureIndent(line)
+		indent, err := measureIndent(line, mode)
 		if err != nil {
-			return 0, &ParseError{Line: i + 1, Message: err.Error()}
+			return 0, *mode, &ParseError{Line: i + 1, Message: err.Error()}
 		}
 
 		// If indent <= parentIndent, we're done with this block
 		if indent <= parentIndent {
-			return i, nil
+			return i, *mode, nil
 		}
 
 		// Set block indent from first non-blank line
 		if blockIndent == -1 {
 			blockIndent = indent
 		} else if indent != blockIndent {
-			// This line is more indented than the block — could be a child.
-			// But if it's less indented than blockIndent, that's an error or end of block.
 			if indent < blockIndent {
-				return i, nil
+				return i, *mode, nil
 			}
-			// More indented than blockIndent but we're not inside a nested object.
-			// This shouldn't happen at this level — it's a consistency error.
-			return 0, &ParseError{Line: i + 1, Message: "inconsistent indentation"}
+			return 0, *mode, &ParseError{Line: i + 1, Message: "inconsistent indentation"}
 		}
 
 		content := strings.TrimLeft(line, " \t")
@@ -73,43 +171,164 @@ func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Co
 
 		if key == "" && value != "" {
 			// Empty key with value (from list markers or "= value"):
-			// Add value directly as categorical entry in parent
-			leaf := newNode()
-			leaf.addEntry(value, newNode())
-			parent.mergeFrom(leaf)
+			// Add value directly as categorical entry in parent.
+			// Use addListEntry to preserve list structure for categorical output.
+			parent.addListEntry(value, newNode())
 			i++
 		} else if value == "" {
-			// Empty value: could have indented children
-			child := newNode()
-			nextLine, err := buildTree(child, lines, i+1, blockIndent, cfg)
-			if err != nil {
-				return 0, err
-			}
+			// Empty value: check if next indented lines are nested KVL or multiline text
+			if indentedBlockHasSeparator(lines, i+1, blockIndent, cfg, mode) {
+				// Nested key-value pairs
+				child := newNode()
+				nextLine, _, err := buildTree(child, lines, i+1, blockIndent, cfg, mode, depth+1)
+				if err != nil {
+					return 0, *mode, err
+				}
 
-			if child.isEmpty() {
-				// No children found — treat as empty string value
-				leaf := newNode()
-				leaf.addEntry("", newNode())
-				parent.addEntry(key, leaf)
+				if child.isEmpty() {
+					parent.addEntry(key, newNode())
+				} else {
+					parent.addEntry(key, child)
+				}
+				i = nextLine
 			} else {
-				parent.addEntry(key, child)
+				// Check for multiline value continuation
+				multiValue, nextLine := collectMultilineBlock(lines, i+1, blockIndent, mode)
+				if multiValue != "" {
+					// Multiline value: create leaf
+					leaf := newNode()
+					leaf.addEntry(multiValue, newNode())
+					parent.addEntry(key, leaf)
+					i = nextLine
+				} else {
+					// Truly empty value
+					parent.addEntry(key, newNode())
+					i++
+				}
 			}
-			i = nextLine
 		} else {
-			// Leaf: value is a string, create categorical entry {value: {}}
+			// Has a value — check for multiline continuation
+			multiValue, nextLine := collectMultilineContinuation(lines, i, value, blockIndent, mode)
+
 			leaf := newNode()
-			leaf.addEntry(value, newNode())
+			leaf.addEntry(multiValue, newNode())
 			parent.addEntry(key, leaf)
-			i++
+			i = nextLine
 		}
 	}
 
-	return i, nil
+	return i, *mode, nil
 }
 
-// measureIndent counts the effective indentation of a line.
-// Tabs count as 4 spaces each.
-func measureIndent(line string) (int, error) {
+// collectMultilineContinuation collects continuation lines that are indented
+// deeper than the current line's block indent for a value that already has
+// initial content. Returns the combined value and next line index.
+func collectMultilineContinuation(lines []string, currentLine int, initialValue string, blockIndent int, mode *indentMode) (string, int) {
+	i := currentLine + 1
+
+	// Check if next non-blank line is more indented
+	for i < len(lines) && isBlank(lines[i]) {
+		i++
+	}
+	if i >= len(lines) {
+		return initialValue, currentLine + 1
+	}
+
+	nextIndent, err := measureIndentNoEnforce(lines[i])
+	if err != nil || nextIndent <= blockIndent {
+		return initialValue, currentLine + 1
+	}
+
+	// Has continuation — collect all deeper-indented lines
+	i = currentLine + 1
+	var parts []string
+
+	for i < len(lines) {
+		line := lines[i]
+		if isBlank(line) {
+			// Peek ahead
+			j := i + 1
+			for j < len(lines) && isBlank(lines[j]) {
+				j++
+			}
+			if j < len(lines) {
+				ni, nerr := measureIndentNoEnforce(lines[j])
+				if nerr == nil && ni > blockIndent {
+					for k := i; k < j; k++ {
+						parts = append(parts, lines[k])
+					}
+					i = j
+					continue
+				}
+			}
+			break
+		}
+		indent, ierr := measureIndentNoEnforce(line)
+		if ierr != nil || indent <= blockIndent {
+			break
+		}
+		parts = append(parts, line)
+		i++
+	}
+
+	if len(parts) == 0 {
+		return initialValue, currentLine + 1
+	}
+
+	var b strings.Builder
+	b.WriteString(initialValue)
+	for _, p := range parts {
+		b.WriteByte('\n')
+		b.WriteString(p)
+	}
+	return b.String(), i
+}
+
+// measureIndent counts the effective indentation of a line and enforces
+// strict tab/space mode.
+func measureIndent(line string, mode *indentMode) (int, error) {
+	indent := 0
+	hasTabs := false
+	hasSpaces := false
+
+	for _, ch := range line {
+		switch ch {
+		case ' ':
+			indent++
+			hasSpaces = true
+		case '\t':
+			indent += 4
+			hasTabs = true
+		default:
+			goto done
+		}
+	}
+done:
+	// Only enforce mode if there is actual indentation
+	if indent > 0 {
+		if hasTabs && hasSpaces {
+			return 0, fmt.Errorf("mixed tabs and spaces in indentation")
+		}
+		if hasTabs {
+			if *mode == indentSpaces {
+				return 0, fmt.Errorf("tab indentation used in a file that uses spaces")
+			}
+			*mode = indentTabs
+		}
+		if hasSpaces {
+			if *mode == indentTabs {
+				return 0, fmt.Errorf("space indentation used in a file that uses tabs")
+			}
+			*mode = indentSpaces
+		}
+	}
+
+	return indent, nil
+}
+
+// measureIndentNoEnforce counts effective indentation without enforcing
+// tab/space mode. Used for lookahead checks.
+func measureIndentNoEnforce(line string) (int, error) {
 	indent := 0
 	for _, ch := range line {
 		switch ch {

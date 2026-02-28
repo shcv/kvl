@@ -1,0 +1,92 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "KVL",
+  "scopeName": "source.kvl",
+  "patterns": [
+    { "include": "#header" },
+    { "include": "#comment" },
+    { "include": "#list-marker" },
+    { "include": "#assignment-arrow" },
+    { "include": "#assignment-colonequals" },
+    { "include": "#assignment-colon" },
+    { "include": "#assignment-equals" }
+  ],
+  "repository": {
+    "header": {
+      "name": "meta.header.kvl",
+      "match": "^(#)(\\S+)(\\s+kvl\\s+\\d+\\.\\d+.*)$",
+      "captures": {
+        "1": { "name": "punctuation.definition.preprocessor.kvl" },
+        "2": { "name": "keyword.operator.separator.kvl" },
+        "3": { "name": "keyword.control.header.kvl" }
+      }
+    },
+    "comment": {
+      "name": "comment.line.kvl",
+      "match": "^\\s*/=.*$"
+    },
+    "list-marker": {
+      "match": "^(\\s*)([-+*])(\\s)(.*)?$",
+      "captures": {
+        "2": { "name": "keyword.operator.list-marker.kvl" },
+        "4": { "patterns": [{ "include": "#value" }] }
+      }
+    },
+    "assignment-arrow": {
+      "match": "^(\\s*)((?:(?!->)[^\\\\\\n]|\\\\.)*?)(\\s*)(->)(\\s*)(.*)$",
+      "captures": {
+        "2": { "name": "variable.other.key.kvl" },
+        "4": { "name": "keyword.operator.separator.kvl" },
+        "6": { "patterns": [{ "include": "#value" }] }
+      }
+    },
+    "assignment-colonequals": {
+      "match": "^(\\s*)((?:(?!:=)[^\\\\\\n]|\\\\.)*?)(\\s*)(:=)(\\s*)(.*)$",
+      "captures": {
+        "2": { "name": "variable.other.key.kvl" },
+        "4": { "name": "keyword.operator.separator.kvl" },
+        "6": { "patterns": [{ "include": "#value" }] }
+      }
+    },
+    "assignment-colon": {
+      "match": "^(\\s*)((?:[^:\\\\\\n]|\\\\:)*?)(\\s*)(:)(\\s*)(.*)$",
+      "captures": {
+        "2": { "name": "variable.other.key.kvl" },
+        "4": { "name": "keyword.operator.separator.kvl" },
+        "6": { "patterns": [{ "include": "#value" }] }
+      }
+    },
+    "assignment-equals": {
+      "match": "^(\\s*)((?:[^=\\\\\\n]|\\\\=)*?)(\\s*)(=)(\\s*)(.*)$",
+      "captures": {
+        "2": { "name": "variable.other.key.kvl" },
+        "4": { "name": "keyword.operator.separator.kvl" },
+        "6": { "patterns": [{ "include": "#value" }] }
+      }
+    },
+    "value": {
+      "patterns": [
+        { "include": "#escape-sequence" },
+        { "include": "#boolean" },
+        { "include": "#number" },
+        { "include": "#string-value" }
+      ]
+    },
+    "escape-sequence": {
+      "name": "constant.character.escape.kvl",
+      "match": "\\\\[=:>]"
+    },
+    "boolean": {
+      "name": "constant.language.boolean.kvl",
+      "match": "^\\s*(true|false)\\s*$"
+    },
+    "number": {
+      "name": "constant.numeric.kvl",
+      "match": "^\\s*-?\\d+(\\.\\d+)?\\s*$"
+    },
+    "string-value": {
+      "name": "string.unquoted.kvl",
+      "match": ".+"
+    }
+  }
+}

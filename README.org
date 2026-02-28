@@ -118,6 +118,9 @@ server =
 - [[file:fixtures/][fixtures/]] - Canonical test fixtures shared across implementations
 - [[file:conformance/][conformance/]] - Cross-implementation conformance test harness
 - [[file:emacs/][emacs/]] - Emacs major mode for KVL
+- [[file:vim/][vim/]] - Vim/Neovim ftplugin for KVL
+- [[file:vscode/][vscode/]] - VS Code extension for KVL
+- [[file:tree-sitter-kvl/][tree-sitter-kvl/]] - Tree-sitter grammar for KVL
 - [[file:kvq/][kvq/]] - KVL query tool
 
 * License

@@ -36,6 +36,7 @@ export function parse(text, config) {
   if (text.length > MAX_INPUT_SIZE) {
     throw new KvlParseError(`Input exceeds maximum size of ${MAX_INPUT_SIZE} bytes`);
   }
+  _checkIndentConsistency(text);
   config = ensureConfig(config, text);
   const kvs = keyvals(text, config);
   const model = _buildModel(kvs, config);
@@ -78,6 +79,39 @@ export function load(filePath, config) {
 function ensureConfig(config, text) {
   if (config) return config;
   return parseHeader(text) ?? new KvlConfig();
+}
+
+/**
+ * Verify that indentation uses only tabs or only spaces, not both.
+ * The first indented line determines the indent mode.
+ * @param {string} text
+ */
+function _checkIndentConsistency(text) {
+  let indentChar = null;
+  const lines = text.split('\n');
+  for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+    const line = lines[lineNum];
+    if (!line || (line[0] !== ' ' && line[0] !== '\t')) continue;
+    // Extract leading whitespace
+    let leadingEnd = 0;
+    while (leadingEnd < line.length && (line[leadingEnd] === ' ' || line[leadingEnd] === '\t')) {
+      leadingEnd++;
+    }
+    if (leadingEnd === 0) continue;
+    if (indentChar === null) {
+      indentChar = line[0];
+    }
+    for (let col = 0; col < leadingEnd; col++) {
+      if (line[col] !== indentChar) {
+        const expected = indentChar === '\t' ? 'tabs' : 'spaces';
+        const found = line[col] === '\t' ? 'tab' : 'space';
+        throw new KvlParseError(
+          `Mixed indentation: expected ${expected} but found ${found}`,
+          lineNum + 1, col + 1
+        );
+      }
+    }
+  }
 }
 
 /**

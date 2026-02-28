@@ -1,0 +1,68 @@
+{
+  "Key-Value Pair": {
+    "prefix": "kv",
+    "body": [
+      "${1:key} = ${2:value}"
+    ],
+    "description": "Simple key-value pair"
+  },
+  "Nested Block": {
+    "prefix": "block",
+    "body": [
+      "${1:key} =",
+      "    ${2:child_key} = ${3:value}",
+      "    ${0}"
+    ],
+    "description": "Nested key-value block"
+  },
+  "Header": {
+    "prefix": "header",
+    "body": [
+      "#${1:=} kvl 1.0${0}"
+    ],
+    "description": "KVL file header"
+  },
+  "Header with List Markers": {
+    "prefix": "headerlist",
+    "body": [
+      "#${1:=} kvl 1.0 ${2:-}"
+    ],
+    "description": "KVL header with list marker declaration"
+  },
+  "Comment": {
+    "prefix": "comment",
+    "body": [
+      "/= ${0}"
+    ],
+    "description": "KVL comment line"
+  },
+  "List with Markers": {
+    "prefix": "list",
+    "body": [
+      "${1:key} =",
+      "    - ${2:item1}",
+      "    - ${3:item2}",
+      "    - ${0}"
+    ],
+    "description": "List using dash markers (requires header with - marker)"
+  },
+  "Repeated Keys": {
+    "prefix": "repeat",
+    "body": [
+      "${1:key} = ${2:value1}",
+      "${1:key} = ${3:value2}",
+      "${1:key} = ${0}"
+    ],
+    "description": "Repeated keys (creates list/categorical structure)"
+  },
+  "Server Config": {
+    "prefix": "server",
+    "body": [
+      "server =",
+      "    host = ${1:localhost}",
+      "    port = ${2:8080}",
+      "    ${0}"
+    ],
+    "description": "Server configuration block"
+  }
+}
