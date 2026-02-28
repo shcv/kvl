@@ -171,17 +171,64 @@ class KvlSerializer {
       const sep = this._formatSeparator(true);
       this.lines.push(`${indentStr}${escapedKey}${sep}`);
     } else if (value.includes('\n')) {
-      // Write as continuation block: key =\n  line1\n  line2...
-      const sep = this._formatSeparator(true);
-      this.lines.push(`${indentStr}${escapedKey}${sep}`);
-      const childIndent = this.indent.repeat(level + 1);
-      for (const line of value.split('\n')) {
-        this.lines.push(`${childIndent}${line}`);
-      }
+      this._serializeMultilineValue(escapedKey, value, indentStr, level);
     } else {
       const escapedValue = this._escapeText(value);
       const sep = this._formatSeparator();
       this.lines.push(`${indentStr}${escapedKey}${sep}${escapedValue}`);
+    }
+  }
+
+  _serializeMultilineValue(escapedKey, value, indentStr, level) {
+    const parentIndentLen = indentStr.length;
+
+    if (value.startsWith('\n')) {
+      // Empty-key continuation: value is \n followed by indented lines
+      const contentLines = value.slice(1).split('\n');
+      const nonBlank = contentLines.filter(l => l.trim());
+      const minIndent = nonBlank.length
+        ? Math.min(...nonBlank.map(l => l.length - l.trimStart().length))
+        : 0;
+      if (nonBlank.length && minIndent > parentIndentLen) {
+        // Original indentation is valid — preserve it
+        const sep = this._formatSeparator(true);
+        this.lines.push(`${indentStr}${escapedKey}${sep}`);
+        for (const line of contentLines) {
+          this.lines.push(line);
+        }
+      } else {
+        // Re-indent canonically
+        const sep = this._formatSeparator(true);
+        this.lines.push(`${indentStr}${escapedKey}${sep}`);
+        const childIndent = this.indent.repeat(level + 1);
+        for (const line of contentLines) {
+          this.lines.push(`${childIndent}${line}`);
+        }
+      }
+    } else {
+      // Valued-key continuation: first line is inline, rest are indented
+      const allLines = value.split('\n');
+      const contLines = allLines.slice(1);
+      const nonBlank = contLines.filter(l => l.trim());
+      const minIndent = nonBlank.length
+        ? Math.min(...nonBlank.map(l => l.length - l.trimStart().length))
+        : 0;
+      if (nonBlank.length && minIndent > parentIndentLen) {
+        // Continuation lines have valid indentation — preserve as valued-key form
+        const sep = this._formatSeparator();
+        this.lines.push(`${indentStr}${escapedKey}${sep}${this._escapeText(allLines[0])}`);
+        for (const line of contLines) {
+          this.lines.push(line);
+        }
+      } else {
+        // Re-indent canonically using empty-key form
+        const sep = this._formatSeparator(true);
+        this.lines.push(`${indentStr}${escapedKey}${sep}`);
+        const childIndent = this.indent.repeat(level + 1);
+        for (const line of allLines) {
+          this.lines.push(`${childIndent}${line}`);
+        }
+      }
     }
   }
 

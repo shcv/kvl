@@ -607,12 +607,10 @@ func trimMultiline(value string) string {
 			if i > 0 {
 				b.WriteByte('\n')
 			}
-			if isBlank(line) {
-				b.WriteString(line)
-			} else if len(line) >= minIndent {
+			if len(line) >= minIndent {
 				b.WriteString(line[minIndent:])
 			} else {
-				b.WriteString(line)
+				b.WriteString("")
 			}
 		}
 		return b.String()
@@ -645,12 +643,10 @@ func trimMultiline(value string) string {
 	b.WriteString(allLines[0])
 	for _, line := range allLines[1:] {
 		b.WriteByte('\n')
-		if isBlank(line) {
-			b.WriteString(line)
-		} else if len(line) >= minIndent {
+		if len(line) >= minIndent {
 			b.WriteString(line[minIndent:])
 		} else {
-			b.WriteString(line)
+			b.WriteString("")
 		}
 	}
 	return b.String()

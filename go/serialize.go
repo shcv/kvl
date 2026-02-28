@@ -63,19 +63,96 @@ func writeEntry(b *strings.Builder, key string, value any, sep string, indent in
 
 	case string:
 		if strings.Contains(v, "\n") {
-			// Multiline value: write as continuation block
-			b.WriteString(prefix)
-			b.WriteString(escapedKey)
-			b.WriteString(" ")
-			b.WriteString(sep)
-			b.WriteString("\n")
-			childPrefix := strings.Repeat("    ", indent+1)
-			for _, line := range strings.Split(v, "\n") {
-				b.WriteString(childPrefix)
-				b.WriteString(line)
-				b.WriteString("\n")
+			parentIndentLen := indent * 4 // 4 spaces per indent level
+
+			if strings.HasPrefix(v, "\n") {
+				// Empty-key continuation
+				content := v[1:]
+				contentLines := strings.Split(content, "\n")
+
+				// Find min indent of non-blank lines
+				minIndent := -1
+				for _, l := range contentLines {
+					trimmed := strings.TrimSpace(l)
+					if trimmed != "" {
+						lineIndent := len(l) - len(strings.TrimLeft(l, " \t"))
+						if minIndent == -1 || lineIndent < minIndent {
+							minIndent = lineIndent
+						}
+					}
+				}
+
+				if minIndent > parentIndentLen {
+					// Valid indent — preserve
+					b.WriteString(prefix)
+					b.WriteString(escapedKey)
+					b.WriteString(" ")
+					b.WriteString(sep)
+					b.WriteString("\n")
+					for _, l := range contentLines {
+						b.WriteString(l)
+						b.WriteString("\n")
+					}
+				} else {
+					// Re-indent canonically
+					b.WriteString(prefix)
+					b.WriteString(escapedKey)
+					b.WriteString(" ")
+					b.WriteString(sep)
+					b.WriteString("\n")
+					childPrefix := strings.Repeat("    ", indent+1)
+					for _, l := range contentLines {
+						b.WriteString(childPrefix)
+						b.WriteString(l)
+						b.WriteString("\n")
+					}
+				}
+			} else {
+				// Valued-key continuation
+				allLines := strings.Split(v, "\n")
+				contLines := allLines[1:]
+
+				minIndent := -1
+				for _, l := range contLines {
+					trimmed := strings.TrimSpace(l)
+					if trimmed != "" {
+						lineIndent := len(l) - len(strings.TrimLeft(l, " \t"))
+						if minIndent == -1 || lineIndent < minIndent {
+							minIndent = lineIndent
+						}
+					}
+				}
+
+				if minIndent > parentIndentLen {
+					// Valid indent — preserve as valued-key form
+					b.WriteString(prefix)
+					b.WriteString(escapedKey)
+					b.WriteString(" ")
+					b.WriteString(sep)
+					b.WriteString(" ")
+					b.WriteString(escapeSep(allLines[0], sep))
+					b.WriteString("\n")
+					for _, l := range contLines {
+						b.WriteString(l)
+						b.WriteString("\n")
+					}
+				} else {
+					// Re-indent canonically using empty-key form
+					b.WriteString(prefix)
+					b.WriteString(escapedKey)
+					b.WriteString(" ")
+					b.WriteString(sep)
+					b.WriteString("\n")
+					childPrefix := strings.Repeat("    ", indent+1)
+					for _, l := range allLines {
+						b.WriteString(childPrefix)
+						b.WriteString(l)
+						b.WriteString("\n")
+					}
+				}
 			}
 		} else {
+			// Single-line value
 			b.WriteString(prefix)
 			b.WriteString(escapedKey)
 			b.WriteString(" ")

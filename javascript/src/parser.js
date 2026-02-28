@@ -112,9 +112,7 @@ function _trimMultiline(value) {
     if (!nonBlank.length) return value;
     const minIndent = Math.min(...nonBlank.map(l => l.length - l.trimStart().length));
     if (minIndent === 0) return value;
-    return lines.map(l =>
-      l.trim() && l.length >= minIndent ? l.slice(minIndent) : l
-    ).join('\n');
+    return lines.map(l => l.slice(minIndent)).join('\n');
   }
 
   // Valued-key continuation: first line is inline, rest are continuation
@@ -125,9 +123,7 @@ function _trimMultiline(value) {
   if (!nonBlankCont.length) return value;
   const minIndent = Math.min(...nonBlankCont.map(l => l.length - l.trimStart().length));
   if (minIndent === 0) return value;
-  return [lines[0], ...contLines.map(l =>
-    l.trim() && l.length >= minIndent ? l.slice(minIndent) : l
-  )].join('\n');
+  return [lines[0], ...contLines.map(l => l.slice(minIndent))].join('\n');
 }
 
 /**

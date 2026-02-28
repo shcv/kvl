@@ -820,11 +820,8 @@ fn trimMultiline(alloc: Allocator, value: []const u8) ![]const u8 {
         // Dedent all lines
         var result = std.ArrayListUnmanaged(u8){};
         for (line_items, 0..) |l, j| {
-            const trimmed = std.mem.trimLeft(u8, l, " \t");
-            if (trimmed.len > 0 and l.len >= min_indent) {
+            if (l.len >= min_indent) {
                 try result.appendSlice(alloc, l[min_indent..]);
-            } else {
-                try result.appendSlice(alloc, l);
             }
             if (j + 1 < line_items.len) {
                 try result.append(alloc, '\n');
@@ -859,11 +856,8 @@ fn trimMultiline(alloc: Allocator, value: []const u8) ![]const u8 {
     try result.appendSlice(alloc, line_items[0]);
     for (line_items[1..]) |l| {
         try result.append(alloc, '\n');
-        const trimmed = std.mem.trimLeft(u8, l, " \t");
-        if (trimmed.len > 0 and l.len >= min_indent) {
+        if (l.len >= min_indent) {
             try result.appendSlice(alloc, l[min_indent..]);
-        } else {
-            try result.appendSlice(alloc, l);
         }
     }
     return result.items;
@@ -1220,6 +1214,20 @@ fn serializeValue(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), val: Value
     }
 }
 
+fn minNonBlankIndent(text: []const u8) ?usize {
+    var min_indent: ?usize = null;
+    var iter = std.mem.splitScalar(u8, text, '\n');
+    while (iter.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t");
+        if (trimmed.len == 0) continue;
+        const indent = line.len - std.mem.trimLeft(u8, line, " \t").len;
+        if (min_indent == null or indent < min_indent.?) {
+            min_indent = indent;
+        }
+    }
+    return min_indent;
+}
+
 fn serializeObject(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), obj: *const OrderedMap, config: Config, level: usize) !void {
     for (obj.entries.items) |entry| {
         try writeIndent(alloc, buf, level, "  ");
@@ -1257,14 +1265,70 @@ fn serializeObject(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), obj: *con
                     try writeSep(alloc, buf, config, true);
                     try buf.append(alloc, '\n');
                 } else if (std.mem.indexOfScalar(u8, s, '\n') != null) {
-                    // Multiline value: write as continuation block
-                    try writeSep(alloc, buf, config, true);
-                    try buf.append(alloc, '\n');
-                    var iter = std.mem.splitScalar(u8, s, '\n');
-                    while (iter.next()) |line| {
-                        try writeIndent(alloc, buf, level + 1, "  ");
-                        try buf.appendSlice(alloc, line);
-                        try buf.append(alloc, '\n');
+                    // Multiline value: preserve or re-indent
+                    const parent_indent = level * 2;
+                    if (s.len > 0 and s[0] == '\n') {
+                        // Empty-key continuation: leading \n
+                        const content = s[1..];
+                        const mi = minNonBlankIndent(content);
+                        if (mi != null and mi.? > parent_indent) {
+                            // Preserve: write lines as-is
+                            try writeSep(alloc, buf, config, true);
+                            try buf.append(alloc, '\n');
+                            var iter = std.mem.splitScalar(u8, content, '\n');
+                            while (iter.next()) |line| {
+                                try buf.appendSlice(alloc, line);
+                                try buf.append(alloc, '\n');
+                            }
+                        } else {
+                            // Re-indent: write each content line with child indent
+                            try writeSep(alloc, buf, config, true);
+                            try buf.append(alloc, '\n');
+                            var iter = std.mem.splitScalar(u8, content, '\n');
+                            while (iter.next()) |line| {
+                                try writeIndent(alloc, buf, level + 1, "  ");
+                                try buf.appendSlice(alloc, line);
+                                try buf.append(alloc, '\n');
+                            }
+                        }
+                    } else {
+                        // Valued-key continuation: first line is inline
+                        var all_iter = std.mem.splitScalar(u8, s, '\n');
+                        var all_lines = std.ArrayListUnmanaged([]const u8){};
+                        defer all_lines.deinit(alloc);
+                        while (all_iter.next()) |line| {
+                            try all_lines.append(alloc, line);
+                        }
+                        const items = all_lines.items;
+                        if (items.len < 2) {
+                            // Shouldn't happen (we checked for \n), but handle gracefully
+                            try writeSep(alloc, buf, config, false);
+                            try writeEscaped(alloc, buf, s, config.separator);
+                            try buf.append(alloc, '\n');
+                        } else {
+                            const cont_start = items[0].len + 1; // skip first line + \n
+                            const cont_text = s[cont_start..];
+                            const mi = minNonBlankIndent(cont_text);
+                            if (mi != null and mi.? > parent_indent) {
+                                // Preserve: write first line as value, rest as-is
+                                try writeSep(alloc, buf, config, false);
+                                try writeEscaped(alloc, buf, items[0], config.separator);
+                                try buf.append(alloc, '\n');
+                                for (items[1..]) |line| {
+                                    try buf.appendSlice(alloc, line);
+                                    try buf.append(alloc, '\n');
+                                }
+                            } else {
+                                // Re-indent: write all lines with child indent
+                                try writeSep(alloc, buf, config, true);
+                                try buf.append(alloc, '\n');
+                                for (items) |line| {
+                                    try writeIndent(alloc, buf, level + 1, "  ");
+                                    try buf.appendSlice(alloc, line);
+                                    try buf.append(alloc, '\n');
+                                }
+                            }
+                        }
                     }
                 } else {
                     try writeSep(alloc, buf, config, false);

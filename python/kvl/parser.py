@@ -134,10 +134,7 @@ def _trim_multiline(value: str) -> str:
         min_indent = min(len(l) - len(l.lstrip()) for l in non_blank)
         if min_indent == 0:
             return value
-        return '\n'.join(
-            l[min_indent:] if l.strip() and len(l) >= min_indent else l
-            for l in lines
-        )
+        return '\n'.join(l[min_indent:] for l in lines)
 
     # Valued-key continuation: first line is inline value, rest are continuation
     lines = value.split('\n')
@@ -152,10 +149,7 @@ def _trim_multiline(value: str) -> str:
         return value
     dedented = [lines[0]]
     for l in cont_lines:
-        if l.strip():
-            dedented.append(l[min_indent:] if len(l) >= min_indent else l)
-        else:
-            dedented.append(l)
+        dedented.append(l[min_indent:])
     return '\n'.join(dedented)
 
 

@@ -220,16 +220,59 @@ class KvlSerializer:
             sep_str = self._format_separator(for_empty=True)
             self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
         elif "\n" in value:
-            # Write as continuation block: key = \n  line1\n  line2...
-            sep_str = self._format_separator(for_empty=True)
-            self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
-            child_indent = self.indent * (level + 1)
-            for line in value.split('\n'):
-                self.lines.append(f"{child_indent}{line}")
+            self._serialize_multiline_value(escaped_key, value, indent_str, level)
         else:
             escaped_value = self._escape_text(value)
             sep_str = self._format_separator()
             self.lines.append(f"{indent_str}{escaped_key}{sep_str}{escaped_value}")
+
+    def _serialize_multiline_value(self, escaped_key: str, value: str, indent_str: str, level: int) -> None:
+        """Serialize a multiline string value as a continuation block."""
+        parent_indent_len = len(indent_str)
+
+        if value.startswith('\n'):
+            # Empty-key continuation: value is \n followed by indented lines
+            content_lines = value[1:].split('\n')
+            non_blank = [l for l in content_lines if l.strip()]
+            if non_blank:
+                min_indent = min(len(l) - len(l.lstrip()) for l in non_blank)
+            else:
+                min_indent = 0
+            if non_blank and min_indent > parent_indent_len:
+                # Original indentation is valid — preserve it
+                sep_str = self._format_separator(for_empty=True)
+                self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
+                for line in content_lines:
+                    self.lines.append(line)
+            else:
+                # Re-indent canonically
+                sep_str = self._format_separator(for_empty=True)
+                self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
+                child_indent = self.indent * (level + 1)
+                for line in content_lines:
+                    self.lines.append(f"{child_indent}{line}")
+        else:
+            # Valued-key continuation: first line is inline, rest are indented
+            all_lines = value.split('\n')
+            cont_lines = all_lines[1:]
+            non_blank = [l for l in cont_lines if l.strip()]
+            if non_blank:
+                min_indent = min(len(l) - len(l.lstrip()) for l in non_blank)
+            else:
+                min_indent = 0
+            if non_blank and min_indent > parent_indent_len:
+                # Continuation lines have valid indentation — preserve as valued-key form
+                sep_str = self._format_separator()
+                self.lines.append(f"{indent_str}{escaped_key}{sep_str}{self._escape_text(all_lines[0])}")
+                for line in cont_lines:
+                    self.lines.append(line)
+            else:
+                # Re-indent canonically using empty-key form
+                sep_str = self._format_separator(for_empty=True)
+                self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
+                child_indent = self.indent * (level + 1)
+                for line in all_lines:
+                    self.lines.append(f"{child_indent}{line}")
 
     def _serialize_list(self, items: List[KvlValue], level: int) -> None:
         """
