@@ -1257,9 +1257,15 @@ fn serializeObject(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), obj: *con
                     try writeSep(alloc, buf, config, true);
                     try buf.append(alloc, '\n');
                 } else if (std.mem.indexOfScalar(u8, s, '\n') != null) {
+                    // Multiline value: write as continuation block
                     try writeSep(alloc, buf, config, true);
-                    try writeEscaped(alloc, buf, s, config.separator);
                     try buf.append(alloc, '\n');
+                    var iter = std.mem.splitScalar(u8, s, '\n');
+                    while (iter.next()) |line| {
+                        try writeIndent(alloc, buf, level + 1, "  ");
+                        try buf.appendSlice(alloc, line);
+                        try buf.append(alloc, '\n');
+                    }
                 } else {
                     try writeSep(alloc, buf, config, false);
                     try writeEscaped(alloc, buf, s, config.separator);

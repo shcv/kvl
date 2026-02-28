@@ -137,7 +137,7 @@ class KvlSerializer {
       } else if (Array.isArray(value)) {
         this._serializeListValue(key, value, indentStr, level);
       } else if (typeof value === 'string') {
-        this._serializeStringValue(key, value, indentStr);
+        this._serializeStringValue(key, value, indentStr, level);
       } else {
         throw new KvlSerializeError(`Unsupported value type: ${typeof value}`);
       }
@@ -165,16 +165,21 @@ class KvlSerializer {
     this._serializeList(value, level + 1);
   }
 
-  _serializeStringValue(key, value, indentStr) {
+  _serializeStringValue(key, value, indentStr, level = 0) {
     const escapedKey = this._escapeText(key);
-    const escapedValue = this._escapeText(value);
     if (!value) {
       const sep = this._formatSeparator(true);
       this.lines.push(`${indentStr}${escapedKey}${sep}`);
     } else if (value.includes('\n')) {
-      const sep = this._formatSeparator(false, true);
-      this.lines.push(`${indentStr}${escapedKey}${sep}${escapedValue}`);
+      // Write as continuation block: key =\n  line1\n  line2...
+      const sep = this._formatSeparator(true);
+      this.lines.push(`${indentStr}${escapedKey}${sep}`);
+      const childIndent = this.indent.repeat(level + 1);
+      for (const line of value.split('\n')) {
+        this.lines.push(`${childIndent}${line}`);
+      }
     } else {
+      const escapedValue = this._escapeText(value);
       const sep = this._formatSeparator();
       this.lines.push(`${indentStr}${escapedKey}${sep}${escapedValue}`);
     }

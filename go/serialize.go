@@ -62,13 +62,28 @@ func writeEntry(b *strings.Builder, key string, value any, sep string, indent in
 		writeMap(b, v, sep, indent+1)
 
 	case string:
-		b.WriteString(prefix)
-		b.WriteString(escapedKey)
-		b.WriteString(" ")
-		b.WriteString(sep)
-		b.WriteString(" ")
-		b.WriteString(escapeSep(v, sep))
-		b.WriteString("\n")
+		if strings.Contains(v, "\n") {
+			// Multiline value: write as continuation block
+			b.WriteString(prefix)
+			b.WriteString(escapedKey)
+			b.WriteString(" ")
+			b.WriteString(sep)
+			b.WriteString("\n")
+			childPrefix := strings.Repeat("    ", indent+1)
+			for _, line := range strings.Split(v, "\n") {
+				b.WriteString(childPrefix)
+				b.WriteString(line)
+				b.WriteString("\n")
+			}
+		} else {
+			b.WriteString(prefix)
+			b.WriteString(escapedKey)
+			b.WriteString(" ")
+			b.WriteString(sep)
+			b.WriteString(" ")
+			b.WriteString(escapeSep(v, sep))
+			b.WriteString("\n")
+		}
 
 	case []string:
 		// List: write as repeated keys

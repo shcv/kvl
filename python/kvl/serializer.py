@@ -187,7 +187,7 @@ class KvlSerializer:
             elif isinstance(value, list):
                 self._serialize_list_value(key, value, indent_str, level)
             elif isinstance(value, str):
-                self._serialize_string_value(key, value, indent_str)
+                self._serialize_string_value(key, value, indent_str, level)
             else:
                 raise KvlSerializeError(
                     f"Unsupported value type: {type(value).__name__}"
@@ -213,17 +213,21 @@ class KvlSerializer:
         self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
         self._serialize_list(value, level + 1)
     
-    def _serialize_string_value(self, key: str, value: str, indent_str: str) -> None:
+    def _serialize_string_value(self, key: str, value: str, indent_str: str, level: int = 0) -> None:
         """Serialize a string value."""
         escaped_key = self._escape_text(key)
-        escaped_value = self._escape_text(value)
         if not value:
             sep_str = self._format_separator(for_empty=True)
             self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
         elif "\n" in value:
-            sep_str = self._format_separator(for_multiline=True)
-            self.lines.append(f"{indent_str}{escaped_key}{sep_str}{escaped_value}")
+            # Write as continuation block: key = \n  line1\n  line2...
+            sep_str = self._format_separator(for_empty=True)
+            self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
+            child_indent = self.indent * (level + 1)
+            for line in value.split('\n'):
+                self.lines.append(f"{child_indent}{line}")
         else:
+            escaped_value = self._escape_text(value)
             sep_str = self._format_separator()
             self.lines.append(f"{indent_str}{escaped_key}{sep_str}{escaped_value}")
 
