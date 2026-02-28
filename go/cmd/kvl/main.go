@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/kvl-org/kvl/go"
+	"github.com/shcv/kvl/go"
 )
 
 func main() {
