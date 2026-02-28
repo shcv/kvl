@@ -13,6 +13,7 @@ from kvl.errors import (
     KvlSchemaError,
     KvlValidationError,
     KvlTypeError,
+    KvlDiagnostic,
 )
 from kvl.parser import load, loads, parse, keyvals
 from kvl.serializer import dump, dumps
@@ -39,6 +40,7 @@ __all__ = [
     "KvlSchemaError",
     "KvlValidationError",
     "KvlTypeError",
+    "KvlDiagnostic",
     "Schema",
     "KvlConfig",
     "parse_header",

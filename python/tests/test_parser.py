@@ -78,8 +78,8 @@ class TestMultilineValues:
   d
 """
         result = kvl.loads(content)
-        # The indented lines should be part of the value of 'a'
-        expected = {"a": "a\n b\n c\n  d"}
+        # loads() dedents continuation lines by min indent (1)
+        expected = {"a": "a\nb\nc\n d"}
         assert result == expected
 
     def test_multiline_value_empty_initial(self):
@@ -90,9 +90,9 @@ class TestMultilineValues:
   This is indented more
 """
         result = kvl.loads(content)
-        # Lines without separators are treated as literal text per OCaml reference
+        # loads() strips leading \n and dedents by min indent (1)
         expected = {
-            "text": "\n This is line 1\n This is line 2\n  This is indented more"
+            "text": "This is line 1\nThis is line 2\n This is indented more"
         }
         assert result == expected
 
@@ -104,8 +104,8 @@ class TestMultilineValues:
  Violets are blue
 """
         result = kvl.loads(content)
-        # Lines without separators are treated as literal text
-        expected = {"poem": "\n Roses are red\n\n Violets are blue"}
+        # loads() strips leading \n and dedents by min indent (1)
+        expected = {"poem": "Roses are red\n\nViolets are blue"}
         assert result == expected
 
     def test_indented_lines_without_separator_not_new_keys(self):
@@ -116,8 +116,9 @@ class TestMultilineValues:
 next_key = value
 """
         result = kvl.loads(content)
+        # loads() dedents continuation lines by min indent (1)
         expected = {
-            "config": "start\n continuation1\n continuation2",
+            "config": "start\ncontinuation1\ncontinuation2",
             "next_key": "value",
         }
         assert result == expected
@@ -129,8 +130,8 @@ next_key = value
   c
 """
         result = kvl.loads(content)
-        # Per OCaml reference: lines without separators are literal text
-        expected = {"a": "\n  b\n  c"}
+        # loads() strips leading \n and dedents by min indent (2)
+        expected = {"a": "b\nc"}
         assert result == expected
 
 
@@ -240,6 +241,7 @@ class TestAnonymousLists:
 
         With first-split-only, ``= name = react`` splits at the first ``=``
         giving key="" and value="name = react" (literal).
+        Indented lines after the valued key are W001 continuation.
         """
         content = """
         packages =
@@ -249,10 +251,10 @@ class TestAnonymousLists:
             version = 5.0.0
         """
         result = kvl.loads(content)
+        # W001: version lines become continuation of name = react/typescript
         expected = {
             "packages": {
-                "": ["name = react", "name = typescript"],
-                "version": ["18.0.0", "5.0.0"],
+                "name": ["react\nversion = 18.0.0", "typescript\nversion = 5.0.0"],
             }
         }
         assert result == expected
@@ -297,10 +299,13 @@ class TestAnonymousLists:
               = Paste
         """
         result = kvl.loads(content)
+        # W001: deeper-indented lines after valued key become continuation text
         expected = {
             "menu": {
-                "": ["title = File", "title = Edit"],
-                "items": ["New", "Open", "Save", "Cut", "Copy", "Paste"],
+                "title": [
+                    "File\nitems =\n  = New\n  = Open\n  = Save",
+                    "Edit\nitems =\n  = Cut\n  = Copy\n  = Paste",
+                ],
             }
         }
         assert result == expected
@@ -324,10 +329,13 @@ class TestAnonymousLists:
               cpu = 4
         """
         result = kvl.loads(content)
+        # W001: deeper-indented lines after valued key become continuation text
         expected = {
             "servers": {
-                "": ["host = web1.example.com", "host = web2.example.com"],
-                "config": {"memory": ["4GB", "8GB"], "cpu": ["2", "4"]},
+                "host": [
+                    "web1.example.com\nconfig =\n  memory = 4GB\n  cpu = 2",
+                    "web2.example.com\nconfig =\n  memory = 8GB\n  cpu = 4",
+                ],
             }
         }
         assert result == expected

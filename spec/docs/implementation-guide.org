@@ -206,6 +206,103 @@ def unescape_text(text: str, separator: str) -> str:
     return ''.join(result)
 #+end_src
 
+** Continuation Handling
+
+Continuation blocks (multiline values) require a two-pass algorithm:
+
+#+begin_src python
+def process_continuation_block(block_lines, config):
+    """Decide whether a continuation block is nested KVL or plain text."""
+    # 1. Find base level (min indent among non-blank lines)
+    non_blank = [l for l in block_lines if l.strip()]
+    min_indent = min(indent(l) for l in non_blank)
+
+    # 2. Collect base-level lines
+    base_lines = [l for l in non_blank if indent(l) == min_indent]
+
+    # 3. Count separators at base level
+    sep_count = sum(1 for l in base_lines
+                    if has_unescaped_sep(l.lstrip(), config.separator)
+                    or is_list_marker(l.lstrip(), config))
+
+    # 4. Classify
+    if sep_count == len(base_lines):
+        return "nested_kvl"      # Re-parse recursively
+    elif sep_count == 0:
+        return "plain_text"      # No warning
+    else:
+        emit_diagnostic(config, "W002", "Mixed continuation content")
+        return "plain_text"      # Warning: mixed content
+#+end_src
+
+*** Valued Key with Children (W001)
+
+When a key has both an inline value and deeper-indented continuation lines:
+
+#+begin_src python
+def handle_valued_key(key, value, lines, current_idx, parent_indent, config):
+    """Check for continuation after a valued key."""
+    next_idx = current_idx + 1
+    if next_idx < len(lines):
+        next_line = lines[next_idx]
+        if indent(next_line) > parent_indent:
+            # Collect continuation text
+            continuation, end_idx = collect_multiline(lines, next_idx, parent_indent)
+            emit_diagnostic(config, "W001", "Valued key with continuation")
+            return value + continuation, end_idx
+
+    return value, current_idx + 1
+#+end_src
+
+*** Whitespace Trimming (loads() level)
+
+The =loads()= API trims multiline values after compaction:
+
+#+begin_src python
+def trim_multiline(value):
+    """Strip leading newline and dedent continuation lines."""
+    if '\n' not in value:
+        return value
+
+    if value.startswith('\n'):
+        # Empty-key continuation: strip \n, dedent all lines
+        value = value[1:]
+        lines = value.split('\n')
+        non_blank = [l for l in lines if l.strip()]
+        min_indent = min(indent(l) for l in non_blank)
+        return '\n'.join(l[min_indent:] if l.strip() else l for l in lines)
+
+    # Valued-key continuation: first line is inline, dedent rest
+    lines = value.split('\n')
+    cont_lines = lines[1:]
+    non_blank = [l for l in cont_lines if l.strip()]
+    min_indent = min(indent(l) for l in non_blank)
+    return '\n'.join([lines[0]] +
+        [l[min_indent:] if l.strip() else l for l in cont_lines])
+#+end_src
+
+** Diagnostics API
+
+Implementations accumulate diagnostics during parsing:
+
+#+begin_src python
+@dataclass
+class KvlDiagnostic:
+    severity: str  # "warning" or "error"
+    code: str      # "W001", "W002"
+    message: str
+    line: int = None
+
+def emit_diagnostic(config, code, message, line=None):
+    """Emit warning, or raise error in strict mode."""
+    if config.strict:
+        raise KvlParseError(f"[{code}] {message}", line=line)
+    config.diagnostics.append(
+        KvlDiagnostic("warning", code, message, line))
+#+end_src
+
+Diagnostics are stored on the config object, accessible after parsing. Strict mode (=strict= header option or =config.strict = True=) converts all warnings to errors.
+
 ** Comment Handling
 
 Parse comment lines (=/==) as regular keys:

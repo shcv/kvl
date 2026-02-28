@@ -1,0 +1,4 @@
+{
+  "server": "primary\nhost = localhost\nport = 8080",
+  "name": "test"
+}

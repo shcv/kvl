@@ -5,10 +5,10 @@ See: https://c-cube.github.io/ocaml-ccl/ and https://github.com/c-cube/ocaml-ccl
 """
 
 import re
-from typing import Optional, Dict, Any
-from dataclasses import dataclass
+from typing import Optional, Dict, Any, List
+from dataclasses import dataclass, field
 
-from kvl.errors import KvlParseError
+from kvl.errors import KvlParseError, KvlDiagnostic
 
 
 @dataclass
@@ -21,6 +21,8 @@ class KvlConfig:
     space_before: bool = True
     space_after: bool = True
     list_markers: str = ""  # Characters that mark list items (e.g., "-+*")
+    strict: bool = False
+    diagnostics: List[KvlDiagnostic] = field(default_factory=list)
     
     def __post_init__(self):
         """Validate configuration after initialization."""
@@ -132,15 +134,19 @@ def parse_header(text: str) -> Optional[KvlConfig]:
         options.setdefault("space_before", around_value)
         options.setdefault("space_after", around_value)
 
+    strict = bool(options.pop('strict', False))
+
     # Use auto-config for spacing unless explicitly overridden
     if 'space_before' not in options and 'space_after' not in options:
         # Neither spacing option specified - use auto-config
-        return auto_config_for_separator(
+        config = auto_config_for_separator(
             separator,
             version=version,
             compact=options.get('compact', False),
             list_markers=list_markers
         )
+        config.strict = strict
+        return config
     else:
         # At least one spacing option specified - use explicit config
         # Fill in missing spacing options with auto-config defaults
@@ -151,7 +157,8 @@ def parse_header(text: str) -> Optional[KvlConfig]:
             compact=options.get('compact', False),
             space_before=options.get('space_before', auto_config.space_before),
             space_after=options.get('space_after', auto_config.space_after),
-            list_markers=list_markers
+            list_markers=list_markers,
+            strict=strict
         )
 
 

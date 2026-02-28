@@ -2,6 +2,7 @@ package kvl
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -45,7 +46,7 @@ func parse(text string) (*node, Config, error) {
 
 	root := newNode()
 	mode := indentUnknown
-	_, _, err := buildTree(root, lines, startLine, -1, cfg, &mode, 0)
+	_, _, err := buildTree(root, lines, startLine, -1, &cfg, &mode, 0)
 	if err != nil {
 		return nil, cfg, err
 	}
@@ -54,11 +55,24 @@ func parse(text string) (*node, Config, error) {
 	return root, cfg, nil
 }
 
-// indentedBlockHasSeparator checks whether the indented block starting at
-// startLine (with indentation > parentIndent) contains any lines with
-// unescaped separators. This is used to distinguish multiline value
-// continuation from nested key-value pairs.
-func indentedBlockHasSeparator(lines []string, startLine, parentIndent int, cfg Config, mode *indentMode) bool {
+// emitDiagnostic adds a warning diagnostic, or returns an error if strict mode is enabled.
+func emitDiagnostic(cfg *Config, code, message string, line int) error {
+	if cfg.Strict {
+		return &ParseError{Line: line, Message: fmt.Sprintf("[%s] %s", code, message)}
+	}
+	cfg.Diagnostics = append(cfg.Diagnostics, Diagnostic{
+		Severity: "warning", Code: code, Message: message, Line: line,
+	})
+	return nil
+}
+
+// classifyBlock checks lines in the indented block starting at startLine
+// (with indentation > parentIndent). It finds the minimum indent level
+// among non-blank lines (base-level lines) and checks whether ALL or SOME
+// of those base-level lines contain unescaped separators or list markers.
+func classifyBlock(lines []string, startLine, parentIndent int, cfg *Config, mode *indentMode) (allSep bool, someSep bool) {
+	// First pass: find minimum indent among non-blank lines in the block
+	minIndent := math.MaxInt
 	for i := startLine; i < len(lines); i++ {
 		line := lines[i]
 		if isBlank(line) {
@@ -68,20 +82,54 @@ func indentedBlockHasSeparator(lines []string, startLine, parentIndent int, cfg 
 		if err != nil || indent <= parentIndent {
 			break
 		}
+		if indent < minIndent {
+			minIndent = indent
+		}
+	}
+
+	if minIndent == math.MaxInt {
+		return false, false
+	}
+
+	// Second pass: check all base-level lines (those at minIndent)
+	totalBase := 0
+	sepCount := 0
+	for i := startLine; i < len(lines); i++ {
+		line := lines[i]
+		if isBlank(line) {
+			continue
+		}
+		indent, err := measureIndentNoEnforce(line)
+		if err != nil || indent <= parentIndent {
+			break
+		}
+		if indent != minIndent {
+			continue
+		}
+		totalBase++
 		content := strings.TrimLeft(line, " \t")
+		hasSep := false
 		// Check for list markers
 		if cfg.ListMarkers != "" && len(content) >= 2 {
 			for _, marker := range cfg.ListMarkers {
 				if rune(content[0]) == marker && (content[1] == ' ' || content[1] == '\t') {
-					return true
+					hasSep = true
+					break
 				}
 			}
 		}
-		if findUnescapedSep(content, cfg.Separator) >= 0 {
-			return true
+		if !hasSep && findUnescapedSep(content, cfg.Separator) >= 0 {
+			hasSep = true
+		}
+		if hasSep {
+			sepCount++
 		}
 	}
-	return false
+
+	if totalBase == 0 {
+		return false, false
+	}
+	return sepCount == totalBase, sepCount > 0
 }
 
 // collectMultilineBlock collects all indented lines after a key with empty
@@ -122,7 +170,7 @@ func collectMultilineBlock(lines []string, startLine, parentIndent int, mode *in
 		return "", startLine
 	}
 
-	// Build multiline value with leading newline (matches Python behavior)
+	// Build multiline value with leading newline (matches Python behavior for categorical)
 	var b strings.Builder
 	for _, p := range parts {
 		b.WriteByte('\n')
@@ -134,7 +182,7 @@ func collectMultilineBlock(lines []string, startLine, parentIndent int, mode *in
 // buildTree recursively builds the node tree from lines.
 // parentIndent is the indentation level of the parent block (-1 for root).
 // Returns the next line index to process and the updated indent mode.
-func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Config, mode *indentMode, depth int) (int, indentMode, error) {
+func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg *Config, mode *indentMode, depth int) (int, indentMode, error) {
 	if depth > maxRecursionDepth {
 		return 0, *mode, &ParseError{Line: startLine + 1, Message: fmt.Sprintf("maximum nesting depth of %d exceeded", maxRecursionDepth)}
 	}
@@ -172,7 +220,7 @@ func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Co
 		}
 
 		content := strings.TrimLeft(line, " \t")
-		key, value := parseLine(content, cfg)
+		key, value := parseLine(content, *cfg)
 
 		if key == "" && value != "" {
 			// Empty key with value (from list markers or "= value"):
@@ -182,8 +230,10 @@ func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Co
 			i++
 		} else if value == "" {
 			// Empty value: check if next indented lines are nested KVL or multiline text
-			if indentedBlockHasSeparator(lines, i+1, blockIndent, cfg, mode) {
-				// Nested key-value pairs
+			allSep, someSep := classifyBlock(lines, i+1, blockIndent, cfg, mode)
+
+			if allSep {
+				// All base-level lines have separators: nested KVL (re-parse)
 				child := newNode()
 				nextLine, _, err := buildTree(child, lines, i+1, blockIndent, cfg, mode, depth+1)
 				if err != nil {
@@ -197,6 +247,12 @@ func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Co
 				}
 				i = nextLine
 			} else {
+				if someSep {
+					// Some but not all base-level lines have separators: W002 warning
+					if err := emitDiagnostic(cfg, "W002", "indented block has mixed separator and plain-text lines; treating as plain text", i+1); err != nil {
+						return 0, *mode, err
+					}
+				}
 				// Check for multiline value continuation
 				multiValue, nextLine := collectMultilineBlock(lines, i+1, blockIndent, mode)
 				if multiValue != "" {
@@ -214,6 +270,13 @@ func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg Co
 		} else {
 			// Has a value — check for multiline continuation
 			multiValue, nextLine := collectMultilineContinuation(lines, i, value, blockIndent, mode)
+
+			if multiValue != value {
+				// Continuation lines were collected: emit W001
+				if err := emitDiagnostic(cfg, "W001", "valued key has indented continuation lines; treating as multiline value", i+1); err != nil {
+					return 0, *mode, err
+				}
+			}
 
 			leaf := newNode()
 			leaf.addEntry(multiValue, newNode())
@@ -251,7 +314,7 @@ func collectMultilineContinuation(lines []string, currentLine int, initialValue 
 	for i < len(lines) {
 		line := lines[i]
 		if isBlank(line) {
-			// Peek ahead
+			// Peek ahead: only include blank lines if followed by deeper content
 			j := i + 1
 			for j < len(lines) && isBlank(lines[j]) {
 				j++
@@ -449,12 +512,20 @@ func tryParseHeader(line string) (Config, bool) {
 			// Option: key=value
 			parts := strings.SplitN(tok, "=", 2)
 			cfg.Options[parts[0]] = parts[1]
+		} else if tok == "strict" {
+			// Bare "strict" flag
+			cfg.Strict = true
 		} else {
 			// Could be list markers (characters like -, +, *)
 			// Heuristic: if it doesn't contain = and is short, treat as markers
 			cfg.ListMarkers = tok
 		}
 		tokenIdx++
+	}
+
+	// Check for strict=true in options
+	if v, ok := cfg.Options["strict"]; ok && v == "true" {
+		cfg.Strict = true
 	}
 
 	return cfg, true
@@ -497,4 +568,129 @@ func unescapeSep(text, sep string) string {
 		}
 	}
 	return result.String()
+}
+
+// trimMultiline trims a multiline string value for loads()-level output.
+// If the string starts with \n (block multiline from empty-value key),
+// strip the leading newline, find min indent of non-blank lines, and dedent all.
+// If it does NOT start with \n (valued-key continuation), the first line is
+// inline; compute min indent from lines 2+ and dedent only those lines.
+func trimMultiline(value string) string {
+	if !strings.Contains(value, "\n") {
+		return value
+	}
+
+	if strings.HasPrefix(value, "\n") {
+		// Block multiline: strip leading newline, then dedent all lines
+		body := value[1:]
+		bodyLines := strings.Split(body, "\n")
+
+		// Find min indent among non-blank lines
+		minIndent := math.MaxInt
+		for _, line := range bodyLines {
+			if isBlank(line) {
+				continue
+			}
+			indent := countLeadingSpaces(line)
+			if indent < minIndent {
+				minIndent = indent
+			}
+		}
+
+		if minIndent == math.MaxInt || minIndent == 0 {
+			return body
+		}
+
+		// Dedent all lines
+		var b strings.Builder
+		for i, line := range bodyLines {
+			if i > 0 {
+				b.WriteByte('\n')
+			}
+			if isBlank(line) {
+				b.WriteString(line)
+			} else if len(line) >= minIndent {
+				b.WriteString(line[minIndent:])
+			} else {
+				b.WriteString(line)
+			}
+		}
+		return b.String()
+	}
+
+	// Valued-key continuation: first line is inline, dedent lines 2+
+	allLines := strings.Split(value, "\n")
+	if len(allLines) <= 1 {
+		return value
+	}
+
+	// Find min indent from lines 2+ (non-blank)
+	minIndent := math.MaxInt
+	for _, line := range allLines[1:] {
+		if isBlank(line) {
+			continue
+		}
+		indent := countLeadingSpaces(line)
+		if indent < minIndent {
+			minIndent = indent
+		}
+	}
+
+	if minIndent == math.MaxInt || minIndent == 0 {
+		return value
+	}
+
+	// Build result: first line unchanged, dedent lines 2+
+	var b strings.Builder
+	b.WriteString(allLines[0])
+	for _, line := range allLines[1:] {
+		b.WriteByte('\n')
+		if isBlank(line) {
+			b.WriteString(line)
+		} else if len(line) >= minIndent {
+			b.WriteString(line[minIndent:])
+		} else {
+			b.WriteString(line)
+		}
+	}
+	return b.String()
+}
+
+// countLeadingSpaces counts the number of leading space/tab characters
+// in a string (spaces count as 1, tabs count as 1 for trimming purposes).
+func countLeadingSpaces(s string) int {
+	count := 0
+	for _, ch := range s {
+		if ch == ' ' || ch == '\t' {
+			count++
+		} else {
+			break
+		}
+	}
+	return count
+}
+
+// trimMultilineValues walks a map[string]any and applies trimMultiline
+// to all string values, recursing into nested maps.
+func trimMultilineValues(m map[string]any) {
+	for k, v := range m {
+		switch val := v.(type) {
+		case string:
+			m[k] = trimMultiline(val)
+		case map[string]any:
+			trimMultilineValues(val)
+		case []string:
+			for i, s := range val {
+				val[i] = trimMultiline(s)
+			}
+		case []any:
+			for i, item := range val {
+				if s, ok := item.(string); ok {
+					val[i] = trimMultiline(s)
+				} else if sub, ok := item.(map[string]any); ok {
+					trimMultilineValues(sub)
+				}
+			}
+		}
+	}
 }

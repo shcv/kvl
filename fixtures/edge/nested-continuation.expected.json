@@ -1,0 +1,6 @@
+{
+  "config": {
+    "greeting": "Hello there,\nwelcome aboard",
+    "port": "8080"
+  }
+}

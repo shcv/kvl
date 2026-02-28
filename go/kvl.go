@@ -17,6 +17,8 @@ type Config struct {
 	Version     string
 	ListMarkers string
 	Options     map[string]string
+	Strict      bool
+	Diagnostics []Diagnostic
 }
 
 // DefaultConfig returns a Config with default settings.
@@ -35,6 +37,14 @@ type ParseError struct {
 
 func (e *ParseError) Error() string {
 	return fmt.Sprintf("line %d: %s", e.Line, e.Message)
+}
+
+// Diagnostic represents a warning or error emitted during parsing.
+type Diagnostic struct {
+	Severity string // "warning" or "error"
+	Code     string // e.g. "W001", "W002"
+	Message  string
+	Line     int
 }
 
 // Parse parses KVL text into a categorical map[string]any.
@@ -58,12 +68,15 @@ func ParseString(text string) (map[string]any, error) {
 // Loads parses KVL text into a compacted map[string]any.
 // Categorical structures are converted to lists preserving insertion order.
 // Single-value categoricals become plain strings.
+// Multiline string values are trimmed (leading newline stripped, dedented).
 func Loads(text string) (map[string]any, error) {
 	root, _, err := parse(text)
 	if err != nil {
 		return nil, err
 	}
-	return root.toCompactedMap(), nil
+	result := root.toCompactedMap()
+	trimMultilineValues(result)
+	return result, nil
 }
 
 // Compact converts a categorical map[string]any to a compacted form.
@@ -92,6 +105,7 @@ func Merge(a, b map[string]any) map[string]any {
 
 // LoadsMerge parses two KVL texts, merges them, and returns a compacted
 // result preserving insertion order (from the node tree, not Go maps).
+// Multiline string values are trimmed (leading newline stripped, dedented).
 func LoadsMerge(text1, text2 string) (map[string]any, error) {
 	root1, _, err := parse(text1)
 	if err != nil {
@@ -102,7 +116,9 @@ func LoadsMerge(text1, text2 string) (map[string]any, error) {
 		return nil, err
 	}
 	root1.mergeFrom(root2)
-	return root1.toCompactedMap(), nil
+	result := root1.toCompactedMap()
+	trimMultilineValues(result)
+	return result, nil
 }
 
 // Marshal serializes a map[string]any to KVL text using the default separator "=".

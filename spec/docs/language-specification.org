@@ -65,6 +65,7 @@ Header format: =#{separator} kvl {version} {list-markers} {options...}=
 - =space-after=false= - No space after separator
 - =space-around=true= - Spaces both before and after separator
 - =compact=true= - Enable automatic list compaction in standard API
+- =strict= or =strict=true= - Enable strict mode (warnings become errors)
 
 ** Separators
 
@@ -317,36 +318,80 @@ Multiline values are handled by two-stage processing, matching CCL semantics:
 
 *** Stage 1: Parser Capture
 
-The parser captures an entire indented block as a raw string. Only indentation level matters — if a continuation line is indented deeper than the parent key, it is part of the value. The parser does NOT examine separator characters during this stage.
+The parser captures an entire indented block as a raw string. All lines indented deeper than the parent key are part of the continuation block. The parser does NOT examine separator characters during this stage.
 
-*** Stage 2: Model Re-parse (Fix-point)
+Two capture modes:
+1. *Empty-value key* (=key ==): all deeper-indented lines form the continuation block, prefixed with =\n=
+2. *Valued key with children* (=key = value= followed by deeper lines): the inline value plus all deeper-indented lines form continuation text. This emits warning =W001=.
 
-The captured block is re-parsed as key-value pairs at the block's indentation level:
-- If *all* lines parse as =key {sep} value= → the block becomes a *nested structure*
-- If *any* line fails to parse → the entire block is a *plain text string*
+*** Stage 2: Model Re-parse
 
-This is all-or-nothing: mixed blocks (some lines with separators, some without) are always plain text.
+The continuation block is recursively parsed:
+
+1. Find the *base level* = minimum indent among non-blank lines in the block
+2. Collect all lines at base level (siblings must have identical indent)
+3. Check base-level lines for separators:
+   - If *all* base-level lines have an unescaped separator or list marker → block becomes a *nested structure* (recursively parsed)
+   - If *none* have separators → block is *plain text* (no warning)
+   - If *some* have separators but not all → block is *plain text* + warning =W002=
+
+*** Warning Cases
+
+- =W001= (Valued key with continuation): A key has both an inline value and deeper-indented lines. The indented lines are treated as continuation text, not nested structure.
+- =W002= (Mixed continuation content): Some base-level lines in a continuation block have separators but not all. The entire block is treated as plain text.
+
+In =strict= mode (see Header Options), warnings become parse errors.
 
 *** Examples
 
 #+begin_src kvl
-/= Nested structure (all continuation lines have separator)
+/= Case 1: Nested structure (all base-level lines have separator)
 server =
     host = localhost
     port = 8080
 /= → {server: {host: "localhost", port: "8080"}}
 
-/= Plain text (no continuation line has separator)
+/= Case 2: Plain text (no base-level line has separator)
 description =
     This is a long
     description text
 /= → {description: "This is a long\ndescription text"}
 
-/= Plain text (one line lacks separator → entire block is text)
+/= Case 3: Mixed content (W002 warning, treated as plain text)
 notes =
     line one
     key = value
-/= → {notes: "line one\nkey = value"}
+    another line
+/= → {notes: "line one\nkey = value\nanother line"}
+
+/= Case 4: Valued key with children (W001 warning, continuation text)
+server = primary
+    host = localhost
+    port = 8080
+/= → {server: "primary\nhost = localhost\nport = 8080"}
+
+/= Case 5: Nested key with multiline value
+config =
+    greeting =
+        Hello there,
+        welcome aboard
+    port = 8080
+/= → {config: {greeting: "Hello there,\nwelcome aboard", port: "8080"}}
+
+/= Case 6: Deeply nested (5+ levels)
+a =
+    b =
+        c =
+            d =
+                e = value
+/= → {a: {b: {c: {d: {e: "value"}}}}}
+
+/= Case 7: Varied indent in plain text (dedented by min indent)
+plain-text =
+      Indented first line
+    rest of the text
+    continues here
+/= → {plain-text: "  Indented first line\nrest of the text\ncontinues here"}
 #+end_src
 
 *** Whitespace Trimming
@@ -354,11 +399,21 @@ notes =
 The two API tiers handle multiline whitespace differently:
 
 - =parse()= (low-level): preserves raw whitespace including leading =\n= and absolute indentation
-- =loads()= (high-level): strips leading =\n= and dedents to the block's indentation level
+- =loads()= (high-level): applies trimming to produce clean content:
+  1. Strip leading =\n= (if present)
+  2. Find minimum indent among all non-blank lines
+  3. Remove that many leading spaces from each line
+
+For valued-key continuations (no leading =\n=), the first line is the inline value. Dedenting applies only to subsequent continuation lines, using their minimum indent.
 
 #+begin_src
+/= Empty-value key:
 Raw parse() output:   "\n    This is a long\n    description text"
 Compacted loads():    "This is a long\ndescription text"
+
+/= Valued-key continuation:
+Raw parse() output:   "primary\n    host = localhost\n    port = 8080"
+Compacted loads():    "primary\nhost = localhost\nport = 8080"
 #+end_src
 
 The leading newline and indentation are artifacts of the KVL file's nesting depth, not meaningful content.
@@ -375,6 +430,33 @@ kvl.loads("")   # Returns {}
 ** Forbidden Separators
 
 Separator strings must contain at least one non-whitespace character. Whitespace-only separators are invalid because they would make parsing ambiguous — indentation and key boundaries would be indistinguishable.
+
+** Diagnostics
+
+Implementations accumulate diagnostics during parsing. Each diagnostic has:
+
+- *severity*: ="warning"= or ="error"=
+- *code*: Unique identifier (e.g., =W001=)
+- *message*: Human-readable description
+- *line*: Source line number (optional)
+
+*** Warning Codes
+
+| Code | Name | Description |
+|------+------+-------------|
+| W001 | Valued key with continuation | Indented lines after a valued key are treated as continuation text |
+| W002 | Mixed continuation content | Some base-level lines have separators but not all; block treated as plain text |
+
+*** Strict Mode
+
+When =strict= is enabled (via header option =strict= or =strict=true=), all warnings become parse errors. This ensures configuration files are unambiguous:
+
+#+begin_src kvl
+#= kvl 1.0 strict
+server = primary
+    host = localhost
+/= Error: [W001] Valued key with continuation
+#+end_src
 
 * Semantics
 

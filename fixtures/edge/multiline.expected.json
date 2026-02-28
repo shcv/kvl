@@ -1,4 +1,4 @@
 {
-  "description": "\n    This is a long\n    description that spans\n    multiple lines",
+  "description": "This is a long\ndescription that spans\nmultiple lines",
   "name": "test"
 }

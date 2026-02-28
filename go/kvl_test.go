@@ -589,12 +589,29 @@ func TestMultilineValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse error: %v", err)
 	}
-	expected := "\n    This is a long\n    description that spans\n    multiple lines"
+	expected := "This is a long\ndescription that spans\nmultiple lines"
 	if v := result["description"]; v != expected {
 		t.Errorf("description: got %q, want %q", v, expected)
 	}
 	if v := result["name"]; v != "test" {
 		t.Errorf("name: got %q, want %q", v, "test")
+	}
+}
+
+func TestMultilineRawValue(t *testing.T) {
+	input := "description =\n    This is a long\n    description that spans\n    multiple lines\nname = test\n"
+	result, err := ParseString(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	// Categorical (raw) output preserves leading newline and indentation
+	desc, ok := result["description"].(map[string]any)
+	if !ok {
+		t.Fatalf("description should be map, got %T", result["description"])
+	}
+	expectedKey := "\n    This is a long\n    description that spans\n    multiple lines"
+	if _, ok := desc[expectedKey]; !ok {
+		t.Errorf("missing expected key %q in description, got keys: %v", expectedKey, desc)
 	}
 }
 
@@ -806,6 +823,277 @@ func TestBackslashLiteral(t *testing.T) {
 	}
 	if v := result["path"]; v != `C:\Users\test` {
 		t.Errorf("path: got %q, want %q", v, `C:\Users\test`)
+	}
+}
+
+// --- New edge fixture tests ---
+
+func TestEdgeValuedKeyWithChildren(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "valued-key-with-children")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeValuedKeyWithChildrenCategorical(t *testing.T) {
+	kvlPath := filepath.Join("..", "fixtures", "edge", "valued-key-with-children.kvl")
+	jsonPath := filepath.Join("..", "fixtures", "edge", "valued-key-with-children.categorical.expected.json")
+
+	kvlData, err := os.ReadFile(kvlPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", kvlPath, err)
+	}
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", jsonPath, err)
+	}
+
+	var expected map[string]any
+	if err := json.Unmarshal(jsonData, &expected); err != nil {
+		t.Fatalf("failed to parse expected JSON: %v", err)
+	}
+
+	result, err := ParseString(string(kvlData))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeMixedContinuation(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "mixed-continuation")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeMixedContinuationCategorical(t *testing.T) {
+	kvlPath := filepath.Join("..", "fixtures", "edge", "mixed-continuation.kvl")
+	jsonPath := filepath.Join("..", "fixtures", "edge", "mixed-continuation.categorical.expected.json")
+
+	kvlData, err := os.ReadFile(kvlPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", kvlPath, err)
+	}
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", jsonPath, err)
+	}
+
+	var expected map[string]any
+	if err := json.Unmarshal(jsonData, &expected); err != nil {
+		t.Fatalf("failed to parse expected JSON: %v", err)
+	}
+
+	result, err := ParseString(string(kvlData))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeNestedContinuation(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "nested-continuation")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeNestedContinuationCategorical(t *testing.T) {
+	kvlPath := filepath.Join("..", "fixtures", "edge", "nested-continuation.kvl")
+	jsonPath := filepath.Join("..", "fixtures", "edge", "nested-continuation.categorical.expected.json")
+
+	kvlData, err := os.ReadFile(kvlPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", kvlPath, err)
+	}
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", jsonPath, err)
+	}
+
+	var expected map[string]any
+	if err := json.Unmarshal(jsonData, &expected); err != nil {
+		t.Fatalf("failed to parse expected JSON: %v", err)
+	}
+
+	result, err := ParseString(string(kvlData))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeDeeplyNested(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "deeply-nested")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeVariedIndentContinuation(t *testing.T) {
+	kvlText, expected := loadFixture(t, "edge", "varied-indent-continuation")
+	result, err := Loads(kvlText)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestEdgeVariedIndentContinuationCategorical(t *testing.T) {
+	kvlPath := filepath.Join("..", "fixtures", "edge", "varied-indent-continuation.kvl")
+	jsonPath := filepath.Join("..", "fixtures", "edge", "varied-indent-continuation.categorical.expected.json")
+
+	kvlData, err := os.ReadFile(kvlPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", kvlPath, err)
+	}
+	jsonData, err := os.ReadFile(jsonPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", jsonPath, err)
+	}
+
+	var expected map[string]any
+	if err := json.Unmarshal(jsonData, &expected); err != nil {
+		t.Fatalf("failed to parse expected JSON: %v", err)
+	}
+
+	result, err := ParseString(string(kvlData))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+// --- Diagnostic tests ---
+
+func TestW001ValudKeyWithContinuation(t *testing.T) {
+	input := "server = primary\n    host = localhost\n    port = 8080\n"
+	root, cfg, err := parse(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	_ = root
+	found := false
+	for _, d := range cfg.Diagnostics {
+		if d.Code == "W001" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected W001 diagnostic for valued-key continuation")
+	}
+}
+
+func TestW002MixedBlock(t *testing.T) {
+	input := "notes =\n    line one\n    key = value\n    another line\n"
+	root, cfg, err := parse(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	_ = root
+	found := false
+	for _, d := range cfg.Diagnostics {
+		if d.Code == "W002" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected W002 diagnostic for mixed separator block")
+	}
+}
+
+func TestStrictModeW001Error(t *testing.T) {
+	input := "#= kvl 1.0 strict\nserver = primary\n    host = localhost\n"
+	_, err := Loads(input)
+	if err == nil {
+		t.Error("expected error in strict mode for W001")
+	}
+}
+
+func TestStrictModeHeader(t *testing.T) {
+	// strict as bare word
+	cfg, ok := tryParseHeader("#= kvl 1.0 strict")
+	if !ok {
+		t.Fatal("failed to parse header")
+	}
+	if !cfg.Strict {
+		t.Error("expected Strict=true from bare 'strict'")
+	}
+
+	// strict=true option
+	cfg2, ok := tryParseHeader("#= kvl 1.0 strict=true")
+	if !ok {
+		t.Fatal("failed to parse header")
+	}
+	if !cfg2.Strict {
+		t.Error("expected Strict=true from 'strict=true'")
+	}
+}
+
+func TestTrimMultiline(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "block multiline",
+			input:    "\n    This is a long\n    description that spans\n    multiple lines",
+			expected: "This is a long\ndescription that spans\nmultiple lines",
+		},
+		{
+			name:     "valued-key continuation",
+			input:    "primary\n    host = localhost\n    port = 8080",
+			expected: "primary\nhost = localhost\nport = 8080",
+		},
+		{
+			name:     "varied indent block",
+			input:    "\n      Indented first line\n    rest of the text\n    continues here",
+			expected: "  Indented first line\nrest of the text\ncontinues here",
+		},
+		{
+			name:     "no newlines",
+			input:    "simple value",
+			expected: "simple value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trimMultiline(tt.input)
+			if got != tt.expected {
+				t.Errorf("trimMultiline(%q)\ngot:  %q\nwant: %q", tt.input, got, tt.expected)
+			}
+		})
 	}
 }
 

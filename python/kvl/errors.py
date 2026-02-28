@@ -1,5 +1,6 @@
 """Custom exceptions for KVL processing."""
 
+from dataclasses import dataclass
 from typing import Optional, Any
 
 
@@ -46,3 +47,12 @@ class KvlValidationError(KvlSchemaError):
 class KvlTypeError(KvlSchemaError):
     """Error during type conversion or validation."""
     pass
+
+
+@dataclass
+class KvlDiagnostic:
+    """A warning or error diagnostic emitted during parsing."""
+    severity: str  # "warning" or "error"
+    code: str      # e.g. "W001", "W002"
+    message: str
+    line: Optional[int] = None

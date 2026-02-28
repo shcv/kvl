@@ -5,12 +5,26 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { KvlParseError } from './errors.js';
+import { KvlParseError, KvlDiagnostic } from './errors.js';
 import { KvlConfig, parseHeader, extractContent } from './config.js';
 import { merge, compact } from './transform.js';
 
 const MAX_RECURSION_DEPTH = 100;
 const MAX_INPUT_SIZE = 10 * 1024 * 1024; // 10 MB
+
+/**
+ * Emit a diagnostic (warning, or error in strict mode).
+ * @param {import('./config.js').KvlConfig} config
+ * @param {string} code
+ * @param {string} message
+ * @param {number} [line]
+ */
+function _emitDiagnostic(config, code, message, line) {
+  if (config.strict) {
+    throw new KvlParseError(`[${code}] ${message}`, line);
+  }
+  config.diagnostics.push(new KvlDiagnostic('warning', code, message, line));
+}
 
 /**
  * Parse KVL text into a list of single-key dictionaries.
@@ -53,7 +67,8 @@ export function parse(text, config) {
 export function loads(text, config) {
   config = ensureConfig(config, text);
   const raw = parse(text, config);
-  return compact(raw, config);
+  const compacted = compact(raw, config);
+  return _trimMultilineValues(compacted);
 }
 
 /**
@@ -79,6 +94,58 @@ export function load(filePath, config) {
 function ensureConfig(config, text) {
   if (config) return config;
   return parseHeader(text) ?? new KvlConfig();
+}
+
+/**
+ * Trim a multiline string value for loads() output.
+ * @param {string} value
+ * @returns {string}
+ */
+function _trimMultiline(value) {
+  if (!value.includes('\n')) return value;
+
+  if (value.startsWith('\n')) {
+    // Empty-key continuation: strip leading \n, dedent all lines
+    value = value.slice(1);
+    const lines = value.split('\n');
+    const nonBlank = lines.filter(l => l.trim());
+    if (!nonBlank.length) return value;
+    const minIndent = Math.min(...nonBlank.map(l => l.length - l.trimStart().length));
+    if (minIndent === 0) return value;
+    return lines.map(l =>
+      l.trim() && l.length >= minIndent ? l.slice(minIndent) : l
+    ).join('\n');
+  }
+
+  // Valued-key continuation: first line is inline, rest are continuation
+  const lines = value.split('\n');
+  if (lines.length < 2) return value;
+  const contLines = lines.slice(1);
+  const nonBlankCont = contLines.filter(l => l.trim());
+  if (!nonBlankCont.length) return value;
+  const minIndent = Math.min(...nonBlankCont.map(l => l.length - l.trimStart().length));
+  if (minIndent === 0) return value;
+  return [lines[0], ...contLines.map(l =>
+    l.trim() && l.length >= minIndent ? l.slice(minIndent) : l
+  )].join('\n');
+}
+
+/**
+ * Walk a compacted data structure and trim multiline string values.
+ * @param {*} data
+ * @returns {*}
+ */
+function _trimMultilineValues(data) {
+  if (typeof data === 'string') return _trimMultiline(data);
+  if (Array.isArray(data)) return data.map(item => _trimMultilineValues(item));
+  if (data !== null && typeof data === 'object') {
+    const result = {};
+    for (const [k, v] of Object.entries(data)) {
+      result[k] = _trimMultilineValues(v);
+    }
+    return result;
+  }
+  return data;
 }
 
 /**
@@ -141,9 +208,18 @@ function _collectMultilineValue(lines, startIdx, parentIndent) {
   while (i < lines.length) {
     const line = lines[i];
     if (!line.trim()) {
-      valueLines.push(line);
-      i++;
-      continue;
+      // Peek ahead: only include blank lines if more indented content follows
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      if (j < lines.length) {
+        const nextIndent = lines[j].length - lines[j].trimStart().length;
+        if (nextIndent > parentIndent) {
+          for (let k = i; k < j; k++) valueLines.push(lines[k]);
+          i = j;
+          continue;
+        }
+      }
+      break;
     }
     if (line.length - line.trimStart().length <= parentIndent) break;
     valueLines.push(line);
@@ -251,6 +327,24 @@ function _parseKvs(text, config, allowAnonymousLists = false, depth = 0) {
         valuePart = mlValue;
         i = newI - 1;
       }
+    } else if (valuePart && i + 1 < lines.length) {
+      // Valued key with indented children → continuation text (W001)
+      const nextLine = lines[i + 1] || '';
+      if (nextLine && (nextLine.startsWith(' ') || nextLine.startsWith('\t'))) {
+        const nextIndent = nextLine.length - nextLine.trimStart().length;
+        const parentIndent = line.length - line.trimStart().length;
+        if (nextIndent > parentIndent) {
+          const [contValue, newI] = _collectMultilineValue(lines, i + 1, parentIndent);
+          if (contValue) {
+            _emitDiagnostic(config, 'W001',
+              'Valued key with continuation: indented lines after ' +
+              'a valued key are treated as continuation text',
+              i + 1);
+            valuePart = valuePart + contValue;
+            i = newI - 1;
+          }
+        }
+      }
     }
 
     result.push({ [key]: valuePart });
@@ -330,20 +424,41 @@ function _processValue(value, config, depth = 0) {
     return { [value]: {} };
   }
 
-  const hasSeparator = _findUnescapedSeparator(value, config.separator) !== -1;
-  const hasListMarkers = config.listMarkers && value.split('\n').some(line => {
-    const trimmed = line.trimStart();
-    return config.listMarkers.split('').some(
-      marker => trimmed.startsWith(marker + ' ') || trimmed.startsWith(marker + '\t')
-    );
-  });
+  // Find base level = minimum indent among non-blank lines
+  const lines = value.split('\n');
+  const nonBlank = lines.filter(l => l.trim());
+  if (!nonBlank.length) return { [value]: {} };
 
-  if (!hasSeparator && !hasListMarkers) {
+  const minIndent = Math.min(...nonBlank.map(l => l.length - l.trimStart().length));
+
+  // Collect base-level lines (at minimum indent)
+  const baseLines = nonBlank.filter(l => l.length - l.trimStart().length === minIndent);
+
+  // Check how many base-level lines have separators or list markers
+  let linesWithSep = 0;
+  for (const line of baseLines) {
+    const content = line.trimStart();
+    const hasSep = _findUnescapedSeparator(content, config.separator) !== -1;
+    const hasMarker = config.listMarkers && _isListMarker(content, 0, config);
+    if (hasSep || hasMarker) linesWithSep++;
+  }
+
+  if (linesWithSep === baseLines.length) {
+    // ALL base-level lines have separators → nested KVL
+    const nestedKvs = _parseKvs(value, config, true, depth + 1);
+    return _buildModel(nestedKvs, config, depth);
+  }
+
+  if (linesWithSep === 0) {
+    // NONE have separators → plain text (no warning)
     return { [value]: {} };
   }
 
-  const nestedKvs = _parseKvs(value, config, true, depth + 1);
-  return _buildModel(nestedKvs, config, depth);
+  // SOME have separators → plain text + W002 warning
+  _emitDiagnostic(config, 'W002',
+    'Mixed continuation content: some base-level lines have separators ' +
+    'but not all; block treated as plain text');
+  return { [value]: {} };
 }
 
 /**

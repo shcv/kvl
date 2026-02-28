@@ -1,4 +1,4 @@
-import { KvlParseError } from './errors.js';
+import { KvlParseError, KvlDiagnostic } from './errors.js';
 
 /**
  * Configuration for KVL parsing and serialization.
@@ -20,6 +20,8 @@ export class KvlConfig {
     this.spaceBefore = opts.spaceBefore ?? true;
     this.spaceAfter = opts.spaceAfter ?? true;
     this.listMarkers = opts.listMarkers ?? '';
+    this.strict = opts.strict ?? false;
+    this.diagnostics = opts.diagnostics ?? [];
 
     if (!this.separator) {
       throw new Error('Separator cannot be empty');
@@ -103,12 +105,17 @@ export function parseHeader(text) {
     if (!('spaceAfter' in options)) options.spaceAfter = around;
   }
 
+  const strict = !!options.strict;
+  delete options.strict;
+
   if (!('spaceBefore' in options) && !('spaceAfter' in options)) {
-    return autoConfigForSeparator(separator, {
+    const config = autoConfigForSeparator(separator, {
       version,
       compact: options.compact ?? false,
       listMarkers,
     });
+    config.strict = strict;
+    return config;
   }
 
   const auto = autoConfigForSeparator(separator);
@@ -119,6 +126,7 @@ export function parseHeader(text) {
     spaceBefore: options.spaceBefore ?? auto.spaceBefore,
     spaceAfter: options.spaceAfter ?? auto.spaceAfter,
     listMarkers,
+    strict,
   });
 }
 

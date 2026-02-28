@@ -11,7 +11,7 @@ See: https://c-cube.github.io/ocaml-ccl/ and https://github.com/c-cube/ocaml-ccl
 """
 
 from typing import Dict, List, Optional, Tuple, Any
-from kvl.errors import KvlParseError
+from kvl.errors import KvlParseError, KvlDiagnostic
 from kvl.config import KvlConfig, parse_header, extract_content
 from kvl.utils import handle_read, FileOrPath, ensure_config
 from kvl.transform import merge, compact
@@ -19,6 +19,15 @@ from kvl.transform import merge, compact
 # Security limits to prevent DoS attacks
 MAX_RECURSION_DEPTH = 100  # Maximum nesting depth for structures
 MAX_INPUT_SIZE = 10 * 1024 * 1024  # 10MB maximum input size
+
+
+def _emit_diagnostic(config: KvlConfig, code: str, message: str, line: Optional[int] = None) -> None:
+    """Emit a diagnostic (warning or error in strict mode)."""
+    if config.strict:
+        raise KvlParseError(f"[{code}] {message}", line=line)
+    config.diagnostics.append(KvlDiagnostic(
+        severity="warning", code=code, message=message, line=line
+    ))
 
 
 def keyvals(text: str, config: Optional[KvlConfig] = None) -> List[Dict[str, str]]:
@@ -91,8 +100,9 @@ def loads(text: str, config: Optional[KvlConfig] = None) -> Dict[str, Any]:
     """
     config = ensure_config(config, lambda: parse_header(text) or KvlConfig())
     raw_model = parse(text, config)
+    compacted = compact(raw_model, config)
 
-    return compact(raw_model, config)
+    return _trim_multiline_values(compacted)
 
 
 def load(
@@ -101,6 +111,63 @@ def load(
     """Parse KVL from a file or file path."""
     text = handle_read(file_or_path)
     return loads(text, config)
+
+
+def _trim_multiline(value: str) -> str:
+    """Trim a multiline string value for loads() output.
+
+    Two cases:
+    - Starts with \\n (empty-key continuation): strip leading \\n, dedent all lines
+    - Does not start with \\n (valued-key continuation): first line is inline,
+      dedent only subsequent lines by their min indent
+    """
+    if '\n' not in value:
+        return value
+
+    if value.startswith('\n'):
+        # Empty-key continuation: strip leading \n, dedent all lines
+        value = value[1:]
+        lines = value.split('\n')
+        non_blank = [l for l in lines if l.strip()]
+        if not non_blank:
+            return value
+        min_indent = min(len(l) - len(l.lstrip()) for l in non_blank)
+        if min_indent == 0:
+            return value
+        return '\n'.join(
+            l[min_indent:] if l.strip() and len(l) >= min_indent else l
+            for l in lines
+        )
+
+    # Valued-key continuation: first line is inline value, rest are continuation
+    lines = value.split('\n')
+    if len(lines) < 2:
+        return value
+    cont_lines = lines[1:]
+    non_blank_cont = [l for l in cont_lines if l.strip()]
+    if not non_blank_cont:
+        return value
+    min_indent = min(len(l) - len(l.lstrip()) for l in non_blank_cont)
+    if min_indent == 0:
+        return value
+    dedented = [lines[0]]
+    for l in cont_lines:
+        if l.strip():
+            dedented.append(l[min_indent:] if len(l) >= min_indent else l)
+        else:
+            dedented.append(l)
+    return '\n'.join(dedented)
+
+
+def _trim_multiline_values(data: Any) -> Any:
+    """Walk a compacted data structure and trim multiline string values."""
+    if isinstance(data, dict):
+        return {k: _trim_multiline_values(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [_trim_multiline_values(item) for item in data]
+    elif isinstance(data, str):
+        return _trim_multiline(data)
+    return data
 
 
 def _check_indent_consistency(text: str) -> None:
@@ -143,9 +210,18 @@ def _collect_multiline_value(
     while i < len(lines):
         line = lines[i]
         if not line.strip():
-            value_lines.append(line)
-            i += 1
-            continue
+            # Peek ahead: only include blank lines if more indented content follows
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines):
+                next_indent = len(lines[j]) - len(lines[j].lstrip())
+                if next_indent > parent_indent:
+                    for k in range(i, j):
+                        value_lines.append(lines[k])
+                    i = j
+                    continue
+            break
         if len(line) - len(line.lstrip()) <= parent_indent:
             break
         value_lines.append(line)
@@ -271,6 +347,23 @@ def _parse_kvs(
                     lines, i + 1, parent_indent
                 )
                 i = new_i - 1  # Adjust since main loop will increment
+        elif value_part and i + 1 < len(lines):
+            # Valued key with indented children → continuation text (W001)
+            next_line = lines[i + 1] if i + 1 < len(lines) else ""
+            if next_line and (next_line.startswith(" ") or next_line.startswith("\t")):
+                next_indent = len(next_line) - len(next_line.lstrip())
+                parent_indent = len(line) - len(line.lstrip())
+                if next_indent > parent_indent:
+                    cont_value, new_i = _collect_multiline_value(
+                        lines, i + 1, parent_indent
+                    )
+                    if cont_value:
+                        _emit_diagnostic(config, "W001",
+                            "Valued key with continuation: indented lines after "
+                            "a valued key are treated as continuation text",
+                            line=i + 1)
+                        value_part = value_part + cont_value
+                        i = new_i - 1
 
         result.append({key: value_part})
         i += 1
@@ -329,23 +422,40 @@ def _process_value(value: str, config: KvlConfig, depth: int = 0) -> Dict[str, A
     if '\n' not in value:
         return {value: {}}
 
-    has_separator = _find_unescaped_separator(value, config.separator) != -1
-    has_list_markers = config.list_markers and any(
-        any(
-            line.lstrip().startswith(marker + " ")
-            or line.lstrip().startswith(marker + "\t")
-            for marker in config.list_markers
-        )
-        for line in value.split("\n")
-        if line.strip()
-    )
-    if not has_separator and not has_list_markers:
-        # Return as categorical leaf: {value: {}}
+    # Find base level = minimum indent among non-blank lines
+    lines = value.split("\n")
+    non_blank_lines = [l for l in lines if l.strip()]
+    if not non_blank_lines:
         return {value: {}}
 
-    # Processing nested values, allow anonymous lists
-    nested_kvs = _parse_kvs(value, config, allow_anonymous_lists=True, depth=depth + 1)
-    return _build_model(nested_kvs, config, depth)
+    min_indent = min(len(l) - len(l.lstrip()) for l in non_blank_lines)
+
+    # Collect base-level lines (at minimum indent)
+    base_lines = [l for l in non_blank_lines if len(l) - len(l.lstrip()) == min_indent]
+
+    # Check how many base-level lines have separators or list markers
+    lines_with_sep = 0
+    for line in base_lines:
+        content = line.lstrip()
+        has_sep = _find_unescaped_separator(content, config.separator) != -1
+        has_marker = config.list_markers and _is_list_marker(content, 0, config)
+        if has_sep or has_marker:
+            lines_with_sep += 1
+
+    if lines_with_sep == len(base_lines):
+        # ALL base-level lines have separators → nested KVL
+        nested_kvs = _parse_kvs(value, config, allow_anonymous_lists=True, depth=depth + 1)
+        return _build_model(nested_kvs, config, depth)
+
+    if lines_with_sep == 0:
+        # NONE have separators → plain text (no warning)
+        return {value: {}}
+
+    # SOME have separators → plain text + W002 warning
+    _emit_diagnostic(config, "W002",
+        "Mixed continuation content: some base-level lines have separators "
+        "but not all; block treated as plain text")
+    return {value: {}}
 
 
 def _build_model(

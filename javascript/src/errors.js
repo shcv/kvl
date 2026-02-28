@@ -39,3 +39,21 @@ export class KvlSerializeError extends KvlError {
     this.name = 'KvlSerializeError';
   }
 }
+
+/**
+ * A warning or error diagnostic emitted during parsing.
+ */
+export class KvlDiagnostic {
+  /**
+   * @param {string} severity - "warning" or "error"
+   * @param {string} code - e.g. "W001", "W002"
+   * @param {string} message
+   * @param {number} [line]
+   */
+  constructor(severity, code, message, line) {
+    this.severity = severity;
+    this.code = code;
+    this.message = message;
+    this.line = line ?? null;
+  }
+}

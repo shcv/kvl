@@ -18,6 +18,8 @@ pub const Config = struct {
     space_before: bool = true,
     space_after: bool = true,
     list_markers: []const u8 = "", // Characters like "-+*"
+    strict: bool = false,
+    diagnostics: std.ArrayListUnmanaged(Diagnostic) = .{},
 
     pub fn autoForSeparator(alloc: Allocator, separator: []const u8) !Config {
         const sep = try alloc.dupe(u8, separator);
@@ -34,6 +36,13 @@ pub const Config = struct {
             .space_after = true,
         };
     }
+};
+
+pub const Diagnostic = struct {
+    severity: []const u8, // "warning" or "error"
+    code: []const u8, // e.g. "W001", "W002"
+    message: []const u8,
+    line: ?usize = null,
 };
 
 /// Parse a KVL header from the first line.
@@ -99,6 +108,16 @@ pub fn parseHeader(alloc: Allocator, text: []const u8) !?Config {
     config.separator = separator;
     config.version = version;
     config.list_markers = list_markers;
+
+    // Check remaining tokens for "strict" or "strict=true"
+    if (rest.len > 0) {
+        var token_iter = std.mem.tokenizeAny(u8, rest, " \t");
+        while (token_iter.next()) |token| {
+            if (std.mem.eql(u8, token, "strict") or std.mem.eql(u8, token, "strict=true")) {
+                config.strict = true;
+            }
+        }
+    }
 
     return config;
 }
@@ -501,6 +520,16 @@ const StackEntry = struct {
     obj: *OrderedMap,
 };
 
+/// Emit a diagnostic. In strict mode, the caller should check and return error.
+fn emitDiagnostic(alloc: Allocator, config: *Config, code: []const u8, message: []const u8, line: usize) !void {
+    try config.diagnostics.append(alloc, .{
+        .severity = if (config.strict) "error" else "warning",
+        .code = code,
+        .message = message,
+        .line = line,
+    });
+}
+
 /// Parse KVL text into a categorical object tree (low-level API).
 /// Returns the raw categorical model where repeated keys create nested dicts.
 pub fn parse(alloc: Allocator, input: []const u8) ParseError!*OrderedMap {
@@ -514,9 +543,9 @@ pub fn parseWithConfig(alloc: Allocator, input: []const u8, config_opt: ?Config)
     }
 
     // Determine config: use provided, or parse header, or use default
-    const config = config_opt orelse (parseHeader(alloc, input) catch null) orelse Config{};
-    const separator = config.separator;
-    const list_markers = config.list_markers;
+    var config_mut = config_opt orelse (parseHeader(alloc, input) catch null) orelse Config{};
+    const separator = config_mut.separator;
+    const list_markers = config_mut.list_markers;
 
     // Extract content (skip header line if present)
     const content = extractContent(input);
@@ -654,45 +683,45 @@ pub fn parseWithConfig(alloc: Allocator, input: []const u8, config_opt: ?Config)
 
         if (val.len == 0) {
             // Empty value: check for multiline continuation or nested object
-            if (i + 1 < lines.len) {
-                const next_line = lines[i + 1];
-                if (!isBlank(next_line)) {
-                    const next_raw_indent = measureRawIndent(next_line);
-                    const next_indent = computeIndent(next_line, next_raw_indent);
-                    if (next_indent > indent) {
-                        const next_content = next_line[next_raw_indent..];
-                        const next_has_sep = findUnescapedSeparator(next_content, separator) != null;
-                        const next_is_list = list_markers.len > 0 and isListMarker(next_content, list_markers);
+            // Find the first non-blank deeper line
+            var peek = i + 1;
+            while (peek < lines.len and isBlank(lines[peek])) {
+                peek += 1;
+            }
+            if (peek < lines.len) {
+                const next_line = lines[peek];
+                const next_raw_indent = measureRawIndent(next_line);
+                const next_indent = computeIndent(next_line, next_raw_indent);
+                if (next_indent > indent) {
+                    // Classify ALL base-level lines in the block
+                    const classification = classifyBlock(lines, i + 1, indent, separator, list_markers);
 
-                        if (next_has_sep or next_is_list) {
-                            // Nested structure follows
-                            const child = try getOrCreateNested(parent, alloc, key);
-                            try stack.append(alloc, .{ .indent = indent, .obj = child });
-                            current_list_key = key;
-                            list_parent = parent;
-                            i += 1;
-                            continue;
-                        } else {
-                            // Multiline value continuation
-                            const multiline_val = try collectMultilineValue(alloc, lines, i + 1, indent);
-                            try parent.mergeKey(alloc, key, .{ .string = multiline_val });
-                            // Skip consumed lines
-                            var skip: usize = i + 1;
-                            while (skip < lines.len) {
-                                const ml = lines[skip];
-                                if (isBlank(ml)) {
-                                    skip += 1;
-                                    continue;
-                                }
-                                const ml_indent = computeIndent(ml, measureRawIndent(ml));
-                                if (ml_indent <= indent) break;
-                                skip += 1;
-                            }
-                            i = skip;
-                            current_list_key = null;
-                            list_parent = null;
-                            continue;
-                        }
+                    if (classification.all_sep) {
+                        // ALL base-level lines have separators → nested structure
+                        const child = try getOrCreateNested(parent, alloc, key);
+                        try stack.append(alloc, .{ .indent = indent, .obj = child });
+                        current_list_key = key;
+                        list_parent = parent;
+                        i += 1;
+                        continue;
+                    } else if (classification.some_sep) {
+                        // Mixed content (W002): some have separators, some don't → treat as plain text
+                        try emitDiagnostic(alloc, &config_mut, "W002", "Mixed continuation content: some base-level lines have separators but not all; block treated as plain text", i + 1);
+                        if (config_mut.strict) return ParseError.MixedIndentation;
+                        const multiline_val = try collectMultilineValue(alloc, lines, i + 1, indent);
+                        try parent.mergeKey(alloc, key, .{ .string = multiline_val });
+                        i = skipMultilineLines(lines, i + 1, indent);
+                        current_list_key = null;
+                        list_parent = null;
+                        continue;
+                    } else {
+                        // No separators → multiline value continuation
+                        const multiline_val = try collectMultilineValue(alloc, lines, i + 1, indent);
+                        try parent.mergeKey(alloc, key, .{ .string = multiline_val });
+                        i = skipMultilineLines(lines, i + 1, indent);
+                        current_list_key = null;
+                        list_parent = null;
+                        continue;
                     }
                 }
             }
@@ -702,8 +731,36 @@ pub fn parseWithConfig(alloc: Allocator, input: []const u8, config_opt: ?Config)
             current_list_key = key;
             list_parent = parent;
         } else {
-            // Simple key-value
+            // Non-empty value: store as string, but check for deeper continuation (W001)
             try parent.mergeKey(alloc, key, .{ .string = val });
+
+            // Check if next non-blank line is deeper indented
+            var peek = i + 1;
+            while (peek < lines.len and isBlank(lines[peek])) {
+                peek += 1;
+            }
+            if (peek < lines.len) {
+                const next_line = lines[peek];
+                const next_raw_indent = measureRawIndent(next_line);
+                const next_indent = computeIndent(next_line, next_raw_indent);
+                if (next_indent > indent) {
+                    // Valued key with deeper content → continuation (W001)
+                    const cont_value = try collectMultilineValue(alloc, lines, i + 1, indent);
+                    if (cont_value.len > 0) {
+                        try emitDiagnostic(alloc, &config_mut, "W001", "Valued key with continuation: indented lines after a valued key are treated as continuation text", i + 1);
+                        // Combine val + cont_value
+                        const combined = try std.fmt.allocPrint(alloc, "{s}{s}", .{ val, cont_value });
+                        // Update the existing entry
+                        const last_key_idx = parent.findIndex(key).?;
+                        parent.entries.items[last_key_idx].value = .{ .string = combined };
+                        i = skipMultilineLines(lines, i + 1, indent);
+                        current_list_key = null;
+                        list_parent = null;
+                        continue;
+                    }
+                }
+            }
+
             current_list_key = null;
             list_parent = null;
         }
@@ -724,7 +781,115 @@ pub fn loads(alloc: Allocator, input: []const u8) !Value {
 pub fn loadsWithConfig(alloc: Allocator, input: []const u8, config_opt: ?Config) !Value {
     const config = config_opt orelse (parseHeader(alloc, input) catch null) orelse Config{};
     const root = try parseWithConfig(alloc, input, config);
-    return compact(alloc, .{ .object = root }, config);
+    const compacted = try compact(alloc, .{ .object = root }, config);
+    return trimMultilineValues(alloc, compacted);
+}
+
+/// Trim a multiline string value for loads() output.
+///
+/// Two cases:
+/// - Starts with \n (empty-key continuation): strip leading \n, dedent all lines
+/// - Does not start with \n (valued-key continuation): first line is inline,
+///   dedent only subsequent lines by their min indent
+fn trimMultiline(alloc: Allocator, value: []const u8) ![]const u8 {
+    // If no newline, return as-is
+    if (std.mem.indexOfScalar(u8, value, '\n') == null) return value;
+
+    if (value.len > 0 and value[0] == '\n') {
+        // Empty-key continuation: strip leading \n, dedent all lines
+        const rest = value[1..];
+        var line_iter = std.mem.splitScalar(u8, rest, '\n');
+        var line_list = std.ArrayListUnmanaged([]const u8){};
+        defer line_list.deinit(alloc);
+        while (line_iter.next()) |l| {
+            try line_list.append(alloc, l);
+        }
+        const line_items = line_list.items;
+
+        // Find min indent of non-blank lines
+        var min_indent: usize = std.math.maxInt(usize);
+        for (line_items) |l| {
+            const trimmed = std.mem.trimLeft(u8, l, " \t");
+            if (trimmed.len > 0) {
+                const ind = l.len - trimmed.len;
+                if (ind < min_indent) min_indent = ind;
+            }
+        }
+        if (min_indent == 0 or min_indent == std.math.maxInt(usize)) return rest;
+
+        // Dedent all lines
+        var result = std.ArrayListUnmanaged(u8){};
+        for (line_items, 0..) |l, j| {
+            const trimmed = std.mem.trimLeft(u8, l, " \t");
+            if (trimmed.len > 0 and l.len >= min_indent) {
+                try result.appendSlice(alloc, l[min_indent..]);
+            } else {
+                try result.appendSlice(alloc, l);
+            }
+            if (j + 1 < line_items.len) {
+                try result.append(alloc, '\n');
+            }
+        }
+        return result.items;
+    }
+
+    // Valued-key continuation: first line is inline value, rest are continuation
+    var line_iter = std.mem.splitScalar(u8, value, '\n');
+    var line_list = std.ArrayListUnmanaged([]const u8){};
+    defer line_list.deinit(alloc);
+    while (line_iter.next()) |l| {
+        try line_list.append(alloc, l);
+    }
+    const line_items = line_list.items;
+    if (line_items.len < 2) return value;
+
+    // Find min indent among continuation lines (lines 1+)
+    var min_indent: usize = std.math.maxInt(usize);
+    for (line_items[1..]) |l| {
+        const trimmed = std.mem.trimLeft(u8, l, " \t");
+        if (trimmed.len > 0) {
+            const ind = l.len - trimmed.len;
+            if (ind < min_indent) min_indent = ind;
+        }
+    }
+    if (min_indent == 0 or min_indent == std.math.maxInt(usize)) return value;
+
+    // Dedent only continuation lines
+    var result = std.ArrayListUnmanaged(u8){};
+    try result.appendSlice(alloc, line_items[0]);
+    for (line_items[1..]) |l| {
+        try result.append(alloc, '\n');
+        const trimmed = std.mem.trimLeft(u8, l, " \t");
+        if (trimmed.len > 0 and l.len >= min_indent) {
+            try result.appendSlice(alloc, l[min_indent..]);
+        } else {
+            try result.appendSlice(alloc, l);
+        }
+    }
+    return result.items;
+}
+
+/// Walk a Value tree and trim all multiline string values.
+fn trimMultilineValues(alloc: Allocator, val: Value) !Value {
+    switch (val) {
+        .string => |s| {
+            return .{ .string = try trimMultiline(alloc, s) };
+        },
+        .object => |obj| {
+            const result = try createMap(alloc);
+            for (obj.entries.items) |entry| {
+                try result.put(alloc, entry.key, try trimMultilineValues(alloc, entry.value));
+            }
+            return .{ .object = result };
+        },
+        .array => |arr| {
+            const new_arr = try createArray(alloc);
+            for (arr.items) |item| {
+                try new_arr.append(alloc, try trimMultilineValues(alloc, item));
+            }
+            return .{ .array = new_arr };
+        },
+    }
 }
 
 fn isBlank(line: []const u8) bool {
@@ -788,8 +953,62 @@ fn findUnescapedSeparator(line: []const u8, separator: []const u8) ?usize {
     return null;
 }
 
+/// Classify a block of deeper-indented lines to determine if it's nested KVL or continuation text.
+/// Returns whether all base-level lines have separators and whether some do.
+const BlockClassification = struct {
+    all_sep: bool,
+    some_sep: bool,
+};
+
+fn classifyBlock(lines: []const []const u8, start_idx: usize, parent_indent: i32, separator: []const u8, list_markers: []const u8) BlockClassification {
+    // 1. Find min indent among non-blank lines deeper than parent_indent
+    var min_indent: i32 = std.math.maxInt(i32);
+    var found_any = false;
+    var idx = start_idx;
+    while (idx < lines.len) : (idx += 1) {
+        const line = lines[idx];
+        if (isBlank(line)) continue;
+        const raw = measureRawIndent(line);
+        const ind = computeIndent(line, raw);
+        if (ind <= parent_indent) break;
+        if (ind < min_indent) {
+            min_indent = ind;
+            found_any = true;
+        }
+    }
+
+    if (!found_any) return .{ .all_sep = false, .some_sep = false };
+
+    // 2. Collect base-level lines (at min indent) and count separators
+    var total_base: usize = 0;
+    var with_sep: usize = 0;
+    idx = start_idx;
+    while (idx < lines.len) : (idx += 1) {
+        const line = lines[idx];
+        if (isBlank(line)) continue;
+        const raw = measureRawIndent(line);
+        const ind = computeIndent(line, raw);
+        if (ind <= parent_indent) break;
+        if (ind == min_indent) {
+            total_base += 1;
+            const content = line[raw..];
+            const has_sep = findUnescapedSeparator(content, separator) != null;
+            const has_marker = list_markers.len > 0 and isListMarker(content, list_markers);
+            if (has_sep or has_marker) {
+                with_sep += 1;
+            }
+        }
+    }
+
+    return .{
+        .all_sep = total_base > 0 and with_sep == total_base,
+        .some_sep = with_sep > 0,
+    };
+}
+
 /// Collect multi-line value starting from `start_idx`, where content
 /// must be indented more than `parent_indent`.
+/// Uses peek-ahead for blank lines: only includes them if more deeper content follows.
 fn collectMultilineValue(alloc: Allocator, lines: []const []const u8, start_idx: usize, parent_indent: i32) ![]const u8 {
     var value_lines = std.ArrayListUnmanaged([]const u8){};
     defer value_lines.deinit(alloc);
@@ -798,9 +1017,26 @@ fn collectMultilineValue(alloc: Allocator, lines: []const []const u8, start_idx:
     while (idx < lines.len) {
         const line = lines[idx];
         if (isBlank(line)) {
-            try value_lines.append(alloc, line);
-            idx += 1;
-            continue;
+            // Peek ahead: only include blank lines if more deeper content follows
+            var j = idx + 1;
+            while (j < lines.len and isBlank(lines[j])) {
+                j += 1;
+            }
+            if (j < lines.len) {
+                const next_raw = measureRawIndent(lines[j]);
+                const next_indent = computeIndent(lines[j], next_raw);
+                if (next_indent > parent_indent) {
+                    // Include all blank lines up to j
+                    var k = idx;
+                    while (k < j) : (k += 1) {
+                        try value_lines.append(alloc, lines[k]);
+                    }
+                    idx = j;
+                    continue;
+                }
+            }
+            // No more deeper content after blank lines, stop
+            break;
         }
         const line_indent = computeIndent(line, measureRawIndent(line));
         if (line_indent <= parent_indent) break;
@@ -820,6 +1056,35 @@ fn collectMultilineValue(alloc: Allocator, lines: []const []const u8, start_idx:
         }
     }
     return result.items;
+}
+
+/// Count how many lines would be consumed by collectMultilineValue.
+/// Returns the index after the last consumed line.
+fn skipMultilineLines(lines: []const []const u8, start_idx: usize, parent_indent: i32) usize {
+    var idx = start_idx;
+    while (idx < lines.len) {
+        const line = lines[idx];
+        if (isBlank(line)) {
+            // Peek ahead for blank lines
+            var j = idx + 1;
+            while (j < lines.len and isBlank(lines[j])) {
+                j += 1;
+            }
+            if (j < lines.len) {
+                const next_raw = measureRawIndent(lines[j]);
+                const next_indent = computeIndent(lines[j], next_raw);
+                if (next_indent > parent_indent) {
+                    idx = j;
+                    continue;
+                }
+            }
+            break;
+        }
+        const line_indent = computeIndent(line, measureRawIndent(line));
+        if (line_indent <= parent_indent) break;
+        idx += 1;
+    }
+    return idx;
 }
 
 /// Get an existing object for `key`, or create a new one.
@@ -1637,4 +1902,224 @@ test "mixed indentation rejected" {
 
     const result = parse(a, "/= Invalid indentation - mixing tabs and spaces\nconfig =\n\thost = localhost\n    port = 8080\n");
     try std.testing.expect(result == ParseError.MixedIndentation);
+}
+
+test "multiline continuation with trimming" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try loads(a, "description =\n    This is a long\n    description that spans\n    multiple lines\nname = test\n");
+    switch (val) {
+        .object => |obj| {
+            try std.testing.expectEqualStrings("This is a long\ndescription that spans\nmultiple lines", obj.entries.items[0].value.string);
+            try std.testing.expectEqualStrings("test", obj.entries.items[1].value.string);
+        },
+        else => return error.OutOfMemory,
+    }
+}
+
+test "valued key with children (W001)" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try loads(a, "server = primary\n    host = localhost\n    port = 8080\nname = test\n");
+    switch (val) {
+        .object => |obj| {
+            try std.testing.expectEqualStrings("primary\nhost = localhost\nport = 8080", obj.entries.items[0].value.string);
+            try std.testing.expectEqualStrings("test", obj.entries.items[1].value.string);
+        },
+        else => return error.OutOfMemory,
+    }
+}
+
+test "valued key with children categorical" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const root = try parse(a, "server = primary\n    host = localhost\n    port = 8080\nname = test\n");
+    try std.testing.expectEqual(@as(usize, 2), root.entries.items.len);
+    try std.testing.expectEqualStrings("server", root.entries.items[0].key);
+    try std.testing.expectEqualStrings("primary\n    host = localhost\n    port = 8080", root.entries.items[0].value.string);
+}
+
+test "mixed continuation (some sep, some not)" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try loads(a, "notes =\n    line one\n    key = value\n    another line\n");
+    switch (val) {
+        .object => |obj| {
+            try std.testing.expectEqualStrings("line one\nkey = value\nanother line", obj.entries.items[0].value.string);
+        },
+        else => return error.OutOfMemory,
+    }
+}
+
+test "deeply nested structure" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // Test parse (categorical) first
+    const root = try parse(a, "a =\n    b =\n        c =\n            d =\n                e = value\n");
+    try std.testing.expectEqual(@as(usize, 1), root.entries.items.len);
+    try std.testing.expectEqualStrings("a", root.entries.items[0].key);
+    const b_raw = root.entries.items[0].value.object;
+    try std.testing.expectEqualStrings("b", b_raw.entries.items[0].key);
+    const c_raw = b_raw.entries.items[0].value.object;
+    try std.testing.expectEqualStrings("c", c_raw.entries.items[0].key);
+    const d_raw = c_raw.entries.items[0].value.object;
+    try std.testing.expectEqualStrings("d", d_raw.entries.items[0].key);
+    const e_raw = d_raw.entries.items[0].value.object;
+    try std.testing.expectEqualStrings("e", e_raw.entries.items[0].key);
+
+    // Test loads (compacted) with JSON output for comparison
+    const val = try loads(a, "a =\n    b =\n        c =\n            d =\n                e = value\n");
+    var buf2 = std.ArrayListUnmanaged(u8){};
+    try writeJsonRoot(buf2.writer(a), val);
+    const expected_json =
+        \\{
+        \\  "a": {
+        \\    "b": {
+        \\      "c": {
+        \\        "d": {
+        \\          "e": "value"
+        \\        }
+        \\      }
+        \\    }
+        \\  }
+        \\}
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected_json, buf2.items);
+}
+
+test "varied indent continuation with dedenting" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try loads(a, "plain-text =\n      Indented first line\n    rest of the text\n    continues here\nsibling = key\n");
+    switch (val) {
+        .object => |obj| {
+            try std.testing.expectEqualStrings("  Indented first line\nrest of the text\ncontinues here", obj.entries.items[0].value.string);
+            try std.testing.expectEqualStrings("key", obj.entries.items[1].value.string);
+        },
+        else => return error.OutOfMemory,
+    }
+}
+
+test "nested continuation within nested object" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try loads(a, "config =\n    greeting =\n        Hello there,\n        welcome aboard\n    port = 8080\n");
+    switch (val) {
+        .object => |obj| {
+            const config = obj.entries.items[0].value.object;
+            try std.testing.expectEqualStrings("Hello there,\nwelcome aboard", config.entries.items[0].value.string);
+            try std.testing.expectEqualStrings("8080", config.entries.items[1].value.string);
+        },
+        else => return error.OutOfMemory,
+    }
+}
+
+test "classifyBlock all separators" {
+    const lines = &[_][]const u8{
+        "key =",
+        "    host = localhost",
+        "    port = 8080",
+        "next = val",
+    };
+    const result = classifyBlock(lines, 1, 0, "=", "");
+    try std.testing.expect(result.all_sep);
+    try std.testing.expect(result.some_sep);
+}
+
+test "classifyBlock no separators" {
+    const lines = &[_][]const u8{
+        "key =",
+        "    line one",
+        "    line two",
+        "next = val",
+    };
+    const result = classifyBlock(lines, 1, 0, "=", "");
+    try std.testing.expect(!result.all_sep);
+    try std.testing.expect(!result.some_sep);
+}
+
+test "classifyBlock mixed separators" {
+    const lines = &[_][]const u8{
+        "key =",
+        "    line one",
+        "    key = value",
+        "    another line",
+    };
+    const result = classifyBlock(lines, 1, 0, "=", "");
+    try std.testing.expect(!result.all_sep);
+    try std.testing.expect(result.some_sep);
+}
+
+test "trimMultiline with leading newline" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const result = try trimMultiline(a, "\n    hello\n    world");
+    try std.testing.expectEqualStrings("hello\nworld", result);
+}
+
+test "trimMultiline without leading newline" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const result = try trimMultiline(a, "first\n    second\n    third");
+    try std.testing.expectEqualStrings("first\nsecond\nthird", result);
+}
+
+test "trimMultiline varied indent preserves relative" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const result = try trimMultiline(a, "\n      Indented first line\n    rest of the text\n    continues here");
+    try std.testing.expectEqualStrings("  Indented first line\nrest of the text\ncontinues here", result);
+}
+
+test "strict header parsing" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const config = (try parseHeader(a, "#= kvl 1.0 strict\nname = test\n")).?;
+    try std.testing.expect(config.strict);
+}
+
+test "diagnostic struct" {
+    const d = Diagnostic{
+        .severity = "warning",
+        .code = "W001",
+        .message = "test message",
+        .line = 5,
+    };
+    try std.testing.expectEqualStrings("warning", d.severity);
+    try std.testing.expectEqualStrings("W001", d.code);
+    try std.testing.expectEqual(@as(?usize, 5), d.line);
 }

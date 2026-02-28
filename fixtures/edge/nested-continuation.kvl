@@ -1,0 +1,5 @@
+config =
+    greeting =
+        Hello there,
+        welcome aboard
+    port = 8080

@@ -1,0 +1,8 @@
+{
+  "plain-text": {
+    "\n      Indented first line\n    rest of the text\n    continues here": {}
+  },
+  "sibling": {
+    "key": {}
+  }
+}

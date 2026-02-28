@@ -1,0 +1,10 @@
+{
+  "config": {
+    "greeting": {
+      "\n        Hello there,\n        welcome aboard": {}
+    },
+    "port": {
+      "8080": {}
+    }
+  }
+}

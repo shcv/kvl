@@ -1,0 +1,8 @@
+{
+  "server": {
+    "primary\n    host = localhost\n    port = 8080": {}
+  },
+  "name": {
+    "test": {}
+  }
+}
