@@ -109,12 +109,12 @@ value = a\=b       # \= → = (escape) → value is "a=b"
 path = C:\Users    # \ before U is literal → value is "C:\Users"
 value = a\\=b      # \\ are two literals, \= is escape → value is "a\=b"
 value = a\\\=y     # \\ are two literals, \= is escape → value is "a\\=y"
-a\\=b              # \ before = → escape → no separator → bare key "a\=b"
+a\\=b              # \ before = → escape → no separator → parse error
 #+end_src
 
 *Separator Detection:* To find the unescaped separator, check if the character immediately before the separator is a backslash. If it is, the separator is escaped. No backslash counting or pair processing — a single backslash directly before the separator always means escape.
 
-*Implementation Note:* Implementations should use a two-pass approach: first, find the unescaped separator (using backslash counting) to split key/value; second, unescape by removing backslashes that immediately precede the separator character.
+*Implementation Note:* Implementations should use a two-pass approach: first, find the unescaped separator (checking for a backslash immediately before each candidate) to split key/value; second, unescape by removing backslashes that immediately precede the separator character.
 
 *Consequence:* It is impossible to have a key ending in =\= with zero whitespace before the separator. In practice this is not an issue because KVL allows whitespace around the separator: =key\ = value= works fine.
 
@@ -206,6 +206,14 @@ config = key=value
 #+end_src
 
 This matches CCL behavior and ensures values containing the separator character can be written without escaping.
+
+*** Lines Without Separators
+
+A non-blank, non-indented line with no unescaped separator is a *parse error*. Every top-level statement must contain an unescaped separator (or be a list-marker line when markers are enabled). This matches the reference OCaml CCL behavior where the separator is mandatory.
+
+This rule is essential for continuation/multiline semantics: the presence or absence of separators on base-level lines is what distinguishes nested KVL structure from plain text content. If lines without separators were valid KVL statements, this distinction would collapse.
+
+*Consequence:* If all separator characters on a line are escaped (e.g., =a\\=b= with default separator ===), the line has no unescaped separator and is a parse error. Use whitespace to separate the key from the separator: =a\\ = b= works correctly.
 
 ** Nested Objects
 
@@ -743,6 +751,7 @@ SPACE         ::= ' ' | '\t'
 *Grammar Notes:*
 
 1. *Keys* can contain any characters except the unescaped separator and newlines; empty keys are valid (used by list markers and empty-key syntax)
+9. *No bare keys* — top-level lines without an unescaped separator are parse errors (separator is mandatory)
 2. *Escaped separators* (=\{sep}=) are treated as literal characters in keys and values; all other backslashes are literal
 3. *First split only* — only the first unescaped separator on a line splits key from value; subsequent separators are part of the value
 4. *List markers* must be declared in the header and followed by exactly one space/tab

@@ -505,6 +505,7 @@ pub fn expand(alloc: Allocator, val: Value) !Value {
 pub const ParseError = error{
     InputTooLarge,
     MaxDepthExceeded,
+    MissingSeparator,
     MixedIndentation,
     OutOfMemory,
 };
@@ -665,10 +666,10 @@ pub fn parseWithConfig(alloc: Allocator, input: []const u8, config_opt: ?Config)
                     .array => |_| {},
                 }
             } else if (raw_indent == 0) {
-                // Top-level line without separator = bare key (empty object)
-                const bare_key = std.mem.trim(u8, line_content, " \t");
-                if (bare_key.len > 0) {
-                    try parent.mergeKey(alloc, bare_key, .{ .object = try createMap(alloc) });
+                // Top-level line without separator = parse error (separator is mandatory)
+                const trimmed = std.mem.trim(u8, line_content, " \t");
+                if (trimmed.len > 0) {
+                    return ParseError.MissingSeparator;
                 }
             }
             i += 1;

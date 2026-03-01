@@ -43,7 +43,7 @@ In exchange for some mathematical purity, KVL gains:
 - [[../python/][python]] - Python implementation (reference)
 - [[../go/][go]] - Go implementation
 - [[../zig/][zig]] - Zig implementation
-- [[../js/][js]] - JavaScript/TypeScript (planned)
+- [[../javascript/][javascript]] - JavaScript implementation
 
 * Examples
 

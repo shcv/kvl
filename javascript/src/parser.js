@@ -301,8 +301,7 @@ function _parseKvs(text, config, allowAnonymousLists = false, depth = 0) {
 
     let key, valuePart;
     if (sepPos === -1) {
-      key = line.trim();
-      valuePart = '';
+      throw new KvlParseError(`Missing separator '${config.separator}'`, i + 1);
     } else {
       key = line.slice(0, sepPos).trim();
       valuePart = line.slice(sepPos + config.separator.length).trim();

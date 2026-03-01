@@ -10,9 +10,9 @@
 The KVL Schema system provides flexible, recursive validation of KVL data structures using a field-oriented approach. Unlike traditional object-oriented schemas that require predefined object shapes, KVL schemas allow field specifications to match anywhere in the data hierarchy.
 
 *Implementation Status:*
-- Python (py): Full schema support ✓
-- Zig (zig): Full schema support ✓
-- Go (go): Partial schema support (in progress)
+- Python (py): Full schema support
+- Zig (zig): Full schema support
+- Go (go): Not yet implemented
 - JavaScript (js): Not yet implemented
 
 ** Core Principles

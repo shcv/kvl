@@ -7,7 +7,7 @@ KVL extends the Categorical Configuration Language (CCL) with:
 - Schema validation support
 
 Based on the original CCL by Dmitrii Kovanikov (chshersh).
-See: https://c-cube.github.io/ocaml-ccl/ and https://github.com/c-cube/ocaml-ccl
+See: https://github.com/chshersh/ccl
 """
 
 from typing import Dict, List, Optional, Tuple, Any
@@ -317,9 +317,11 @@ def _parse_kvs(
             i += 1
             continue
         elif sep_pos == -1:
-            # No separator found - treat whole line as key with empty value
-            key = line.strip()
-            value_part = ""
+            # No separator found - parse error (separator is mandatory)
+            raise KvlParseError(
+                f"Missing separator '{config.separator}' on line",
+                line=i + 1,
+            )
         else:
             key = line[:sep_pos].strip()
             value_part = line[sep_pos + len(config.separator) :].strip()

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 KVL (Key-Value Language) is a minimalist configuration format with three core principles:
 1. **Simplicity**: Clean syntax with minimal boilerplate
-2. **Composability**: Mathematical merge operations (semigroup properties)  
+2. **Composability**: Mathematical merge operations (monoid properties)
 3. **Mathematical Soundness**: Associative merging where `(A + B) + C = A + (B + C)`
 
 The project is organized as:
@@ -63,7 +63,7 @@ node src/cli.js parse file.kvl   # Parse a KVL file to JSON
 
 ### Key Architectural Concepts
 
-**Configuration Merging**: KVL configurations are semigroups with associative merge operations:
+**Configuration Merging**: KVL configurations form a commutative monoid with associative merge operations:
 - Simple values: later overrides earlier
 - Objects: recursive merge  
 - Repeated keys: merged into nested categorical structure (NOT arrays)
@@ -133,7 +133,7 @@ Each implementation has its own examples in `<impl>/examples/`.
 
 - Python: 111 passing tests
 - Go: 57 passing tests (API, compatibility, integration, benchmarks)
-- Zig: 35 passing tests (parser, merge, JSON output, escapes, serialization)
+- Zig: 36 passing tests (parser, merge, JSON output, escapes, serialization)
 - JavaScript: 111 passing tests
 
 ## Memories

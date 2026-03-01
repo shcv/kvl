@@ -220,7 +220,10 @@ func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg *C
 		}
 
 		content := strings.TrimLeft(line, " \t")
-		key, value := parseLine(content, *cfg)
+		key, value, err := parseLine(content, *cfg, i+1)
+		if err != nil {
+			return 0, *mode, err
+		}
 
 		if key == "" && value != "" {
 			// Empty key with value (from list markers or "= value"):
@@ -418,13 +421,14 @@ func isBlank(line string) bool {
 
 // parseLine splits a content line (already trimmed of leading indent) into key and value.
 // It handles list markers and separator finding.
-func parseLine(content string, cfg Config) (string, string) {
+// Returns an error if the line has no unescaped separator (bare keys are invalid).
+func parseLine(content string, cfg Config, lineNum int) (string, string, error) {
 	// Check for list markers
 	if cfg.ListMarkers != "" && len(content) >= 2 {
 		for _, marker := range cfg.ListMarkers {
 			if rune(content[0]) == marker && (content[1] == ' ' || content[1] == '\t') {
 				// List marker: empty key, rest is value
-				return "", strings.TrimLeft(content[2:], " \t")
+				return "", strings.TrimLeft(content[2:], " \t"), nil
 			}
 		}
 	}
@@ -433,8 +437,8 @@ func parseLine(content string, cfg Config) (string, string) {
 	sep := cfg.Separator
 	pos := findUnescapedSep(content, sep)
 	if pos < 0 {
-		// No separator found — entire line is the key with empty value
-		return content, ""
+		// No separator found — parse error (separator is mandatory)
+		return "", "", &ParseError{Line: lineNum, Message: fmt.Sprintf("missing separator '%s'", sep)}
 	}
 
 	key := content[:pos]
@@ -445,7 +449,7 @@ func parseLine(content string, cfg Config) (string, string) {
 	// Trim all leading and trailing whitespace from value
 	rest = strings.TrimSpace(rest)
 
-	return key, rest
+	return key, rest, nil
 }
 
 // findUnescapedSep finds the first occurrence of sep in text that is not

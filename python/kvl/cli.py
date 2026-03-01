@@ -2,7 +2,7 @@
 """Command line interface for KVL (Key-Value Language).
 
 Based on the original Categorical Configuration Language (CCL) by Dmitrii Kovanikov (chshersh).
-See: https://c-cube.github.io/ocaml-ccl/ and https://github.com/c-cube/ocaml-ccl
+See: https://github.com/chshersh/ccl
 """
 
 import argparse

@@ -333,9 +333,8 @@ describe('Edge cases', () => {
     expect(result['/']).toBe('This is a comment');
   });
 
-  it('handles line without separator as key with empty value', () => {
-    const result = loads('line without separator');
-    expect(result).toBe('line without separator');
+  it('rejects line without separator', () => {
+    expect(() => loads('line without separator')).toThrow(/[Mm]issing separator/);
   });
 
   it('handles only separator', () => {

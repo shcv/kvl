@@ -146,7 +146,8 @@ def parse_line(line: str, config: KvlConfig) -> tuple:
     # Normal key-value parsing
     sep_pos = find_unescaped_separator(stripped, config.separator)
     if sep_pos == -1:
-        return (indent, stripped, "")
+        # No separator - parse error (separator is mandatory)
+        raise KvlParseError(f"Missing separator '{config.separator}'", line=line_num)
 
     key = stripped[:sep_pos].strip()
     value = stripped[sep_pos + len(config.separator):].strip()
@@ -316,8 +317,8 @@ def parse_line(line: str, config: KvlConfig) -> tuple:
     # /= is just another key, no special handling needed
     sep_pos = find_unescaped_separator(stripped, config.separator)
     if sep_pos == -1:
-        # No separator - whole line is a key with empty value
-        return (indent, stripped, "")
+        # No separator - parse error (separator is mandatory)
+        raise KvlParseError(f"Missing separator '{config.separator}'", line=line_num)
 
     key = stripped[:sep_pos].strip()
     value = stripped[sep_pos + len(config.separator):].strip()

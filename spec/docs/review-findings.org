@@ -1,4 +1,5 @@
 #+TITLE: Deep Review Findings (2026-02-27)
+#+SUBTITLE: HISTORICAL - Most items resolved. See next-steps.org for remaining work.
 
 Items to revisit from the 6-agent deep review of spec and implementations.
 
@@ -17,12 +18,14 @@ Items to revisit from the 6-agent deep review of spec and implementations.
 - Recursive =\== splitting fixed — first split only
 - Escape: fixed =findUnescapedSeparator= — simple =\= before sep check, no pair processing
 
-** Remaining
-- Go: deeper indent after valued key — continuation vs nesting (see next-steps.org)
-- Go: empty value compaction: ={key:{}}= should compact to string
-- Python, Zig, JavaScript: recursion depth limit for indentation nesting (not just value parsing)
-- Zig: O(n^2) merge performance (=OrderedMap.findIndex()= is linear scan)
-- JavaScript: O(n^2) merge performance (=merge()= uses spread copy)
+** DONE Remaining (resolved 2026-02-28)
+- Go: continuation vs nesting — fixed (W001 semantics)
+- Go: empty value compaction — fixed
+- Python, Zig, JavaScript: recursion depth limit — enforced (100 levels)
+- Zig: O(n^2) merge — fixed (OrderedMap uses hash index)
+- JavaScript: O(n^2) merge — fixed (in-place mutation)
+
+** Still open
 - Emacs: no input size limit (should be 10MB), no recursion depth limit
 
 * DONE: Fixture Issues (fixed 2026-02-27/28)

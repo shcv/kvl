@@ -226,19 +226,16 @@ def parse_line(line, config):
     # ... rest of normal parsing
 #+end_src
 
-* Open Questions
+* Open Questions (partially resolved)
 
-1. *Serialization Preference* - When outputting, how to decide between repeated keys vs list markers?
-2. *Mixed Usage* - Should we allow mixing markers in the same list?
-3. *Schema Integration* - How do schemas indicate preference for list markers?
-4. *Error Messages* - How to report errors with list markers clearly?
+1. *Serialization Preference* - Resolved: =dumps()= accepts a =list_marker= parameter to control output format. =None= auto-detects from config, empty string forces categorical.
+2. *Mixed Usage* - Resolved: multiple markers (e.g., =-+*=) can be declared; each list can use any declared marker. Mixing markers within a single list is valid.
+3. *Schema Integration* - Open: how schemas indicate preference for list markers is not yet defined.
+4. *Error Messages* - Resolved: parse errors include line numbers and describe the issue (e.g., "no space after marker").
 
-* Migration Path
+* Migration Path (completed)
 
-1. *Phase 1*: Implement parsing support (reading files with markers)
-2. *Phase 2*: Add serialization support (writing files with markers)
-3. *Phase 3*: Update tooling (kvq, schema validation)
-4. *Phase 4*: Update documentation and examples
+All phases completed. List markers fully implemented across Python, Go, Zig, and JavaScript.
 
 * Conclusion
 

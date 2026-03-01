@@ -87,27 +87,21 @@ Decisions and planned work from the deep review (2026-02-27).
 - Implementation guide: comment stripping API, merge policy helpers
 - =\\== at split position documented with examples
 
-* TODO: Multiline/Continuation Semantics Audit
+* DONE: Multiline/Continuation Semantics Audit
 
-Clarify and enforce the continuation rule across all implementations.
-See =continuation-plan.org= for detailed plan.
+Completed. All implementations enforce W001/W002 semantics. 410/410 conformance.
+See =continuation-plan.org= for historical plan.
 
-Key issues:
-- Go: deeper indent after valued key treated as continuation instead of nesting
-- Spec multiline section needs tightened wording per user feedback
-- Need fixtures for: valued key with children, mixed content blocks, deeply nested continuations
+* DONE: Remaining Implementation Fixes (2026-02-28)
 
-* TODO: Remaining Implementation Fixes
+** DONE Recursion depth enforcement
+- All implementations enforce 100-level limit
 
-** Recursion depth enforcement
-- Python, Zig, JavaScript: enforce 100-level limit for indentation nesting, not just value parsing
-- Go already does this correctly
+** DONE Zig and JavaScript: O(n^2) merge performance
+- Zig: hash index added to OrderedMap
+- JavaScript: in-place mutation in merge
 
-** Zig and JavaScript: O(n^2) merge performance
-- Zig: add hash index to OrderedMap for O(1) key lookup
-- JavaScript: mutate in-place instead of spread copy in merge
-
-** Emacs
+** TODO Emacs
 - Add input size limit (10MB)
 - Add recursion depth limit
 

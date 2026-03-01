@@ -1,4 +1,7 @@
 #+TITLE: Continuation/Multiline Semantics Plan
+#+SUBTITLE: HISTORICAL - This plan was completed. See language-specification.org for the authoritative spec.
+
+*Status:* All stages complete. 410/410 conformance across all implementations.
 
 Detailed plan for auditing and fixing multiline value handling across all implementations.
 
@@ -38,13 +41,13 @@ notes =
     key = value
 /= → {notes: "line one\nkey = value"}
 
-/= Case 4: Key with inline value AND indented children
-/= The inline value is the first entry; children follow
+/= Case 4: Key with inline value AND indented children (W001 warning)
+/= Indented lines become continuation text, NOT nested structure
 server = primary
     host = localhost
     port = 8080
-/= → {server: {primary: {}, host: "localhost", port: "8080"}}
-/= (inline value "primary" becomes a categorical entry)
+/= → {server: "primary\nhost = localhost\nport = 8080"}
+/= (W001: valued key with continuation; see language-specification.org)
 
 /= Case 5: Nested continuation (sub-key has its own multiline value)
 config =
@@ -62,19 +65,13 @@ a =
 /= → {a: {b: {c: {d: "value"}}}}
 #+end_src
 
-* Known Issues
+* Known Issues (resolved)
 
-** Go: deeper indent after valued key
-- Currently treats =server = primary\n    host = localhost= as multiline
-  continuation ("primary\n    host = localhost") instead of nested structure
-- Should check if the continuation block is proper KVL and nest if so
-- Fix: apply the re-parse rule to blocks following valued keys, same as empty-value keys
+** DONE Go: deeper indent after valued key
+- Fixed: Go now treats valued key with children as continuation text (W001), matching all other implementations.
 
-** Spec wording
-- Current multiline section in language-specification.org uses "two-stage processing" language
-- Should be tightened: "continuation block is recursively parsed"
-- Clarify that base-level means "relative to the continuation's indentation, not the file"
-- Add Case 4 (valued key with children) to spec examples
+** DONE Spec wording
+- Fixed: language-specification.org updated with two-stage processing, W001/W002 semantics, and all cases documented.
 
 * Implementation Audit Steps
 
@@ -102,24 +99,6 @@ a =
 - All implementations pass all fixtures
 - Round-trip test: parse → serialize → parse produces equivalent results
 
-* Staged Changes (uncommitted, pending yubikey)
+* Completed
 
-The following changes are staged from the escape/spec work and need to be committed:
-
-- =go/parse.go= — simple escape rule in =findUnescapedSep=, CRLF, whitespace
-- =python/kvl/parser.py= — simple escape rule, first-split-only, multiline serialization
-- =javascript/src/parser.js= — same as Python
-- =python/kvl/transform.py=, =javascript/src/transform.js= — multiline expand fix
-- =go/kvl_test.go= — new tests
-- =zig/src/kvl.zig= — =---= fix
-- =spec/docs/language-specification.org= — escape, multiline, type inference, grammar
-- =spec/docs/implementation-guide.org= — escape, comment stripping, merge policies
-- =spec/docs/next-steps.org=, =spec/docs/review-findings.org= — status updates
-- =CLAUDE.md=, =README.org= — updated to match
-- =fixtures/escape/double-backslash-before-sep.*= — new fixture
-- =fixtures/valid/separator-in-value.*= — new fixture
-- =fixtures/header/colon-equals-separator.*= — new fixture
-- =fixtures/merge/left-identity/*= — new fixture
-- =fixtures/header/list-marker-*.categorical.expected.json= — reverted to arrays
-
-240/240 conformance across Python (lib), Python (CLI), Go, Zig, JavaScript.
+All stages completed. All changes committed. 410/410 conformance across Python (lib), Python (CLI), Go, Zig, JavaScript (with round-trip).

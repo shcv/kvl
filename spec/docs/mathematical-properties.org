@@ -380,7 +380,7 @@ KVL's nested merge semantics align with lens composition in functional programmi
 - *Commutative Monoids:* "Categories for the Working Mathematician" by Saunders Mac Lane
 - *Configuration Management:* "The Twelve-Factor App" methodology
 - *Categorical Semantics:* "Category Theory for Programmers" by Bartosz Milewski
-- *Original CCL:* https://c-cube.github.io/ocaml-ccl/ by Dmitrii Kovanikov
+- *Original CCL:* https://github.com/chshersh/ccl by Dmitrii Kovanikov (chshersh)
 
 * References
 

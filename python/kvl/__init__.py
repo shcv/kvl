@@ -1,7 +1,7 @@
 """Key-Value Language (KVL) implementation in Python.
 
 KVL is based on the original Categorical Configuration Language (CCL) by Dmitrii Kovanikov (chshersh).
-See: https://c-cube.github.io/ocaml-ccl/ and https://github.com/c-cube/ocaml-ccl
+See: https://github.com/chshersh/ccl
 """
 
 __version__ = "0.1.0"

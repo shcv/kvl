@@ -142,6 +142,7 @@ fn printParseError(err: anytype) void {
     switch (err) {
         error.InputTooLarge => std.debug.print("Error: Input exceeds maximum size\n", .{}),
         error.MaxDepthExceeded => std.debug.print("Error: Maximum nesting depth exceeded\n", .{}),
+        error.MissingSeparator => std.debug.print("Error: Missing separator on line\n", .{}),
         error.MixedIndentation => std.debug.print("Error: Mixed tabs and spaces in indentation\n", .{}),
         error.OutOfMemory => std.debug.print("Error: Out of memory\n", .{}),
     }

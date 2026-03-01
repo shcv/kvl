@@ -599,9 +599,9 @@ key = value
 
     def test_malformed_input(self):
         """Test malformed input handling."""
-        # Line without separator is now valid (treated as key with empty value)
-        result = kvl.loads("line without separator")
-        assert result == "line without separator"  # Compacted result
+        # Line without separator is a parse error
+        with pytest.raises(kvl.KvlParseError):
+            kvl.loads("line without separator")
 
         # Only separator is actually valid (creates empty key and empty value)
         result = kvl.loads("=")

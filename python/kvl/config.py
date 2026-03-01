@@ -1,7 +1,7 @@
 """Configuration classes for KVL parsing and serialization.
 
 Based on the original Categorical Configuration Language (CCL) by Dmitrii Kovanikov (chshersh).
-See: https://c-cube.github.io/ocaml-ccl/ and https://github.com/c-cube/ocaml-ccl
+See: https://github.com/chshersh/ccl
 """
 
 import re
