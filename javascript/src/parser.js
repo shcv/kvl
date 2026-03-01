@@ -442,7 +442,7 @@ function _processValue(value, config, depth = 0) {
   if (linesWithSep === baseLines.length) {
     // ALL base-level lines have separators → nested KVL
     const nestedKvs = _parseKvs(value, config, true, depth + 1);
-    return _buildModel(nestedKvs, config, depth);
+    return _buildModel(nestedKvs, config, depth + 1);
   }
 
   if (linesWithSep === 0) {

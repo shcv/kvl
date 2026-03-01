@@ -1,0 +1,6 @@
+name = gamma
+server =
+    host = gamma.example.com
+    debug = true
+tags = backend
+tags = monitor

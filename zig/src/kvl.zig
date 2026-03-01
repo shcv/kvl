@@ -187,6 +187,7 @@ pub const Value = union(enum) {
 
 pub const OrderedMap = struct {
     entries: std.ArrayListUnmanaged(Entry) = .{},
+    index: std.StringHashMapUnmanaged(usize) = .{},
 
     pub const Entry = struct {
         key: []const u8,
@@ -194,10 +195,7 @@ pub const OrderedMap = struct {
     };
 
     pub fn findIndex(self: *const OrderedMap, key: []const u8) ?usize {
-        for (self.entries.items, 0..) |entry, i| {
-            if (std.mem.eql(u8, entry.key, key)) return i;
-        }
-        return null;
+        return self.index.get(key);
     }
 
     pub fn get(self: *const OrderedMap, key: []const u8) ?Value {
@@ -206,14 +204,16 @@ pub const OrderedMap = struct {
     }
 
     pub fn put(self: *OrderedMap, alloc: Allocator, key: []const u8, value: Value) !void {
+        const idx = self.entries.items.len;
         try self.entries.append(alloc, .{ .key = key, .value = value });
+        try self.index.put(alloc, key, idx);
     }
 
     pub fn putOrReplace(self: *OrderedMap, alloc: Allocator, key: []const u8, value: Value) !void {
         if (self.findIndex(key)) |i| {
             self.entries.items[i].value = value;
         } else {
-            try self.entries.append(alloc, .{ .key = key, .value = value });
+            try self.put(alloc, key, value);
         }
     }
 
@@ -698,6 +698,7 @@ pub fn parseWithConfig(alloc: Allocator, input: []const u8, config_opt: ?Config)
 
                     if (classification.all_sep) {
                         // ALL base-level lines have separators → nested structure
+                        if (stack.items.len > MAX_RECURSION_DEPTH) return ParseError.MaxDepthExceeded;
                         const child = try getOrCreateNested(parent, alloc, key);
                         try stack.append(alloc, .{ .indent = indent, .obj = child });
                         current_list_key = key;
@@ -2192,4 +2193,33 @@ test "diagnostic struct" {
     try std.testing.expectEqualStrings("warning", d.severity);
     try std.testing.expectEqualStrings("W001", d.code);
     try std.testing.expectEqual(@as(?usize, 5), d.line);
+}
+
+test "recursion depth limit" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // 101 levels should succeed (at the limit, matching Python/Go/JS)
+    var ok_buf = std.ArrayListUnmanaged(u8){};
+    for (0..101) |level| {
+        for (0..level) |_| {
+            try ok_buf.append(a, ' ');
+        }
+        try ok_buf.appendSlice(a, "k =\n");
+    }
+    const ok_result = parse(a, ok_buf.items);
+    try std.testing.expect(ok_result != ParseError.MaxDepthExceeded);
+
+    // 102 levels should fail (exceeds MAX_RECURSION_DEPTH=100)
+    var bad_buf = std.ArrayListUnmanaged(u8){};
+    for (0..102) |level| {
+        for (0..level) |_| {
+            try bad_buf.append(a, ' ');
+        }
+        try bad_buf.appendSlice(a, "k =\n");
+    }
+    const bad_result = parse(a, bad_buf.items);
+    try std.testing.expect(bad_result == ParseError.MaxDepthExceeded);
 }

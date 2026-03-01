@@ -1,0 +1,25 @@
+{
+  "name": [
+    "alpha",
+    "beta",
+    "gamma"
+  ],
+  "server": {
+    "host": [
+      "alpha.example.com",
+      "gamma.example.com"
+    ],
+    "port": [
+      "8080",
+      "9090"
+    ],
+    "timeout": "30",
+    "debug": "true"
+  },
+  "tags": [
+    "web",
+    "api",
+    "backend",
+    "monitor"
+  ]
+}

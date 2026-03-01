@@ -1,0 +1,6 @@
+name = beta
+server =
+    port = 9090
+    timeout = 30
+tags = api
+tags = backend

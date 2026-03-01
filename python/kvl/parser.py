@@ -439,7 +439,7 @@ def _process_value(value: str, config: KvlConfig, depth: int = 0) -> Dict[str, A
     if lines_with_sep == len(base_lines):
         # ALL base-level lines have separators → nested KVL
         nested_kvs = _parse_kvs(value, config, allow_anonymous_lists=True, depth=depth + 1)
-        return _build_model(nested_kvs, config, depth)
+        return _build_model(nested_kvs, config, depth + 1)
 
     if lines_with_sep == 0:
         # NONE have separators → plain text (no warning)

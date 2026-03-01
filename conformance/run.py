@@ -533,6 +533,21 @@ def run_invalid_tests(fixtures_dir: Path, impl_keys: List[str],
     return results
 
 
+def _merge_via_tempfile(impl_key: str, json_data: Any, overlay_path: Path) -> Tuple[Optional[Any], Optional[str]]:
+    """Merge a JSON result with an overlay KVL file by writing JSON to a temp KVL, then merging."""
+    # Serialize JSON to KVL, write to temp, merge with overlay
+    kvl_text, ser_err = get_serialize_cmd(impl_key, json_data)
+    if ser_err:
+        return None, f"Serialize error: {ser_err}"
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.kvl', delete=False) as tmp:
+        tmp.write(kvl_text)
+        tmp_path = Path(tmp.name)
+    try:
+        return get_merge_cmd(impl_key, tmp_path, overlay_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
 def run_merge_tests(fixtures_dir: Path, impl_keys: List[str],
                     verbose: bool) -> List[Tuple[str, str, TestResult]]:
     """Run merge tests from subdirectories."""
@@ -542,10 +557,17 @@ def run_merge_tests(fixtures_dir: Path, impl_keys: List[str],
         merge_name = merge_dir.name
         base_file = merge_dir / "base.kvl"
         overlay_file = merge_dir / "overlay.kvl"
+        a_file = merge_dir / "a.kvl"
+        b_file = merge_dir / "b.kvl"
+        c_file = merge_dir / "c.kvl"
         expected_file = merge_dir / "expected.json"
         cat_expected_file = merge_dir / "categorical.expected.json"
 
-        if not base_file.exists() or not overlay_file.exists():
+        # Determine test type
+        is_associativity = a_file.exists() and b_file.exists() and c_file.exists()
+        is_standard = base_file.exists() and overlay_file.exists()
+
+        if not is_associativity and not is_standard:
             continue
 
         for impl_key in impl_keys:
@@ -561,8 +583,73 @@ def run_merge_tests(fixtures_dir: Path, impl_keys: List[str],
                                 TestResult("skip", f"merge/{merge_name}", "Missing merge feature")))
                 continue
 
-            # Compacted merge test
-            if expected_file.exists():
+            if is_associativity and expected_file.exists():
+                expected = json.loads(expected_file.read_text())
+
+                # Test (A + B) + C
+                ab, ab_err = get_merge_cmd(impl_key, a_file, b_file)
+                if ab_err:
+                    label = f"merge/{merge_name} [(A+B)+C]"
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("fail", label, f"Error merging A+B: {ab_err}", expected=expected)))
+                    continue
+
+                abc_left, abc_left_err = _merge_via_tempfile(impl_key, ab, c_file)
+                label = f"merge/{merge_name} [(A+B)+C]"
+                if abc_left_err:
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("fail", label, f"Error: {abc_left_err}", expected=expected)))
+                elif json_equal(abc_left, expected):
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("pass", label)))
+                else:
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("fail", label, "Output mismatch",
+                                               actual=abc_left, expected=expected)))
+
+                # Test A + (B + C)
+                bc, bc_err = get_merge_cmd(impl_key, b_file, c_file)
+                if bc_err:
+                    label = f"merge/{merge_name} [A+(B+C)]"
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("fail", label, f"Error merging B+C: {bc_err}", expected=expected)))
+                    continue
+
+                abc_right, abc_right_err = _merge_via_tempfile(impl_key, bc, a_file)
+                if abc_right_err:
+                    # Fall back: try merging A file with serialized B+C
+                    abc_right, abc_right_err = _merge_via_tempfile(impl_key, bc, a_file)
+
+                # For A+(B+C), we need merge(A, merge(B,C)), not merge(merge(B,C), A)
+                # Re-do: serialize B+C to temp, then merge A with it
+                bc_text, bc_ser_err = get_serialize_cmd(impl_key, bc)
+                label = f"merge/{merge_name} [A+(B+C)]"
+                if bc_ser_err:
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("fail", label, f"Serialize error: {bc_ser_err}", expected=expected)))
+                    continue
+
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.kvl', delete=False) as tmp:
+                    tmp.write(bc_text)
+                    tmp_path = Path(tmp.name)
+                try:
+                    abc_right, abc_right_err = get_merge_cmd(impl_key, a_file, tmp_path)
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+
+                if abc_right_err:
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("fail", label, f"Error: {abc_right_err}", expected=expected)))
+                elif json_equal(abc_right, expected):
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("pass", label)))
+                else:
+                    results.append((f"merge/{merge_name}", impl_key,
+                                    TestResult("fail", label, "Output mismatch",
+                                               actual=abc_right, expected=expected)))
+
+            elif is_standard and expected_file.exists():
+                # Standard two-file merge test
                 expected = json.loads(expected_file.read_text())
                 actual, error = get_merge_cmd(impl_key, base_file, overlay_file)
                 label = f"merge/{merge_name} [compacted]"

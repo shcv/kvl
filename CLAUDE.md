@@ -102,22 +102,9 @@ tags = blue
 /= Results in: tags = { red = {}, green = {}, blue = {} }
 ```
 
-## Current Issues
+## Known Limitations
 
-### Zig Feature Gaps
-- **No header parsing** - custom separators and list markers unsupported
-- **No two-tier API** - only has `parse()`, no `loads()`-style compacted API
-- **No KVL serialization** - can only output JSON, not KVL text
-- **No input size or recursion depth limits** (Python and JS cap at 10MB/100 levels)
-
-### Go Feature Gaps
-- **No input size or recursion depth limits**
-
-### Remaining Work
-- Recursion depth enforcement for indentation nesting (Python, Zig, JS)
-- O(n²) merge performance (Zig hash index, JS in-place mutation)
-- Emacs input size/depth limits
-- Missing fixtures: empty key pattern, invalid fixtures, merge associativity, header options
+- Emacs mode has no input size or recursion depth limits
 
 ## Conformance Testing
 
@@ -132,18 +119,21 @@ python run.py --verbose # Show detailed diffs on failures
 Fixtures are in `fixtures/`:
 - `core/` - Minimal fixtures all implementations must pass
 - `valid/` - Extended fixtures (may show implementation differences)
-- `invalid/` - Files that should fail parsing
-- `merge/` - Merge operation test cases
+- `escape/` - Escape handling fixtures
+- `header/` - Custom separator and list marker fixtures
+- `edge/` - Edge cases (empty values, unicode, multiline, continuation)
+- `invalid/` - Files that should fail parsing (bad indent, depth limit)
+- `merge/` - Merge operation test cases (including associativity)
 
-All 5 implementations (Python lib, Python CLI, Go, Zig, JavaScript) pass all conformance fixtures.
+All 5 implementations (Python lib, Python CLI, Go, Zig, JavaScript) pass all conformance fixtures (410/410 with round-trip).
 
 ## Examples and Testing
 
 Each implementation has its own examples in `<impl>/examples/`.
 
 - Python: 111 passing tests
-- Go: 42 passing tests (API, compatibility, integration, benchmarks)
-- Zig: 14 passing tests (parser, merge, JSON output, escapes)
+- Go: 57 passing tests (API, compatibility, integration, benchmarks)
+- Zig: 35 passing tests (parser, merge, JSON output, escapes, serialization)
 - JavaScript: 111 passing tests
 
 ## Memories

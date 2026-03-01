@@ -12,11 +12,10 @@ import { KvlConfig } from './config.js';
  */
 export function merge(model1, model2) {
   if (isDict(model1) && isDict(model2)) {
-    const result = { ...model1 };
     for (const [k, v] of Object.entries(model2)) {
-      result[k] = k in result ? merge(result[k], v) : v;
+      model1[k] = k in model1 ? merge(model1[k], v) : v;
     }
-    return result;
+    return model1;
   }
 
   if (isDict(model1)) return model1;

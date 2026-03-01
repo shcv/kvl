@@ -1,0 +1,6 @@
+name = alpha
+server =
+    host = alpha.example.com
+    port = 8080
+tags = web
+tags = api
