@@ -4,7 +4,7 @@
   "description": "Syntax highlighting, snippets, and editing support for KVL configuration files",
   "version": "1.0.0",
   "publisher": "kvl-lang",
-  "license": "MIT",
+  "license": "CC0-1.0",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -17,9 +17,20 @@
     "key-value",
     "config"
   ],
+  "files": [
+    "language-configuration.json",
+    "package.json",
+    "README.md",
+    "scripts/",
+    "snippets/",
+    "syntaxes/"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/kvl-lang/kvl"
+    "url": "https://github.com/shcv/kvl"
+  },
+  "scripts": {
+    "validate": "node scripts/validate.js"
   },
   "contributes": {
     "languages": [

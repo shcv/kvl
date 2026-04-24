@@ -1,13 +1,10 @@
+include README.md
 include README.org
 include LICENSE
 recursive-include kvl *.py
 recursive-include tests *.py
-recursive-include examples *.kvl *.py
+recursive-include examples *.kvl
 recursive-include docs *.org
-global-exclude *.pyc
-global-exclude __pycache__
-global-exclude *.so
-global-exclude .DS_Store
 prune .git
 prune .pytest_cache
 prune *.egg-info

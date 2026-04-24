@@ -16,19 +16,43 @@ from kvl.schema import Schema
 from kvl.errors import KvlError, KvlSchemaError, KvlValidationError
 
 
+def _emit_json(payload: Dict[str, Any], stream=None) -> None:
+    """Emit a JSON payload with stable formatting."""
+    if stream is None:
+        stream = sys.stdout
+    json.dump(payload, stream, indent=2, ensure_ascii=False, default=str)
+    print(file=stream)
+
+
+def _error_details(error: Exception, stage: str) -> Dict[str, Any]:
+    """Build a machine-readable error payload."""
+    details: Dict[str, Any] = {
+        "stage": stage,
+        "type": error.__class__.__name__,
+        "message": str(error),
+    }
+
+    for attr in ("path", "value", "line", "column"):
+        value = getattr(error, attr, None)
+        if value is not None:
+            details[attr] = value
+
+    return details
+
+
 def convert_command(args) -> None:
     """Convert between KVL and other formats."""
     input_path = Path(args.input)
-    
+
     if not input_path.exists():
         print(f"Error: Input file '{input_path}' does not exist", file=sys.stderr)
         sys.exit(1)
-    
+
     # Create config if separator specified (only for output override)
     output_config = None
     if hasattr(args, 'separator') and args.separator:
         output_config = kvl.auto_config_for_separator(args.separator)
-    
+
     try:
         # Determine input format
         if input_path.suffix.lower() == '.json':
@@ -40,7 +64,7 @@ def convert_command(args) -> None:
         else:
             print(f"Error: Unsupported input format '{input_path.suffix}'", file=sys.stderr)
             sys.exit(1)
-        
+
         # Determine output format and write
         if args.output:
             output_path = Path(args.output)
@@ -63,7 +87,7 @@ def convert_command(args) -> None:
                 # Input is KVL, output JSON to stdout
                 json.dump(data, sys.stdout, indent=2)
                 print()  # Add newline after JSON output
-        
+
     except kvl.KvlError as e:
         print(f"KVL Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -75,45 +99,144 @@ def convert_command(args) -> None:
 def validate_command(args) -> None:
     """Validate a KVL file with optional schema validation."""
     file_path = Path(args.file)
-    
+    json_output = bool(getattr(args, "json", False))
+
     if not file_path.exists():
-        print(f"Error: File '{file_path}' does not exist", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "validate",
+                "file": str(file_path),
+                "schema": str(args.schema) if hasattr(args, "schema") and args.schema else None,
+                "syntax_valid": False,
+                "schema_valid": None,
+                "error": {
+                    "stage": "input",
+                    "type": "FileNotFoundError",
+                    "message": f"File '{file_path}' does not exist",
+                },
+            }, stream=sys.stderr)
+        else:
+            print(f"Error: File '{file_path}' does not exist", file=sys.stderr)
         sys.exit(1)
-    
+
     # Create config if separator specified
     config = None
     if hasattr(args, 'separator') and args.separator:
         config = kvl.auto_config_for_separator(args.separator)
-    
+
     try:
         # Basic KVL syntax validation
         with open(file_path, 'r') as f:
             data = kvl.load(f, config)
-        print(f"'{file_path}' has valid KVL syntax")
-        
+        if not json_output:
+            print(f"'{file_path}' has valid KVL syntax")
+
         # Schema validation if schema file provided
         if hasattr(args, 'schema') and args.schema:
             schema_path = Path(args.schema)
             if not schema_path.exists():
-                print(f"Error: Schema file '{schema_path}' does not exist", file=sys.stderr)
+                if json_output:
+                    _emit_json({
+                        "ok": False,
+                        "command": "validate",
+                        "file": str(file_path),
+                        "schema": str(schema_path),
+                        "syntax_valid": True,
+                        "schema_valid": False,
+                        "error": {
+                            "stage": "schema-discovery",
+                            "type": "FileNotFoundError",
+                            "message": f"Schema file '{schema_path}' does not exist",
+                        },
+                    }, stream=sys.stderr)
+                else:
+                    print(f"Error: Schema file '{schema_path}' does not exist", file=sys.stderr)
                 sys.exit(1)
-            
+
             try:
                 schema = Schema.from_file(str(schema_path))
                 schema.validate(data)
-                print(f"'{file_path}' is valid according to schema '{schema_path}'")
+                if json_output:
+                    _emit_json({
+                        "ok": True,
+                        "command": "validate",
+                        "file": str(file_path),
+                        "schema": str(schema_path),
+                        "syntax_valid": True,
+                        "schema_valid": True,
+                    })
+                else:
+                    print(f"'{file_path}' is valid according to schema '{schema_path}'")
             except KvlSchemaError as e:
-                print(f"Schema error: {e}", file=sys.stderr)
+                if json_output:
+                    _emit_json({
+                        "ok": False,
+                        "command": "validate",
+                        "file": str(file_path),
+                        "schema": str(schema_path),
+                        "syntax_valid": True,
+                        "schema_valid": False,
+                        "error": _error_details(e, "schema"),
+                    }, stream=sys.stderr)
+                else:
+                    print(f"Schema error: {e}", file=sys.stderr)
                 sys.exit(1)
             except KvlValidationError as e:
-                print(f"Validation failed: {e}", file=sys.stderr)
+                if json_output:
+                    _emit_json({
+                        "ok": False,
+                        "command": "validate",
+                        "file": str(file_path),
+                        "schema": str(schema_path),
+                        "syntax_valid": True,
+                        "schema_valid": False,
+                        "error": _error_details(e, "schema"),
+                    }, stream=sys.stderr)
+                else:
+                    print(f"Validation failed: {e}", file=sys.stderr)
                 sys.exit(1)
-                
+            return
+
+        if json_output:
+            _emit_json({
+                "ok": True,
+                "command": "validate",
+                "file": str(file_path),
+                "schema": None,
+                "syntax_valid": True,
+                "schema_valid": None,
+            })
+
     except kvl.KvlError as e:
-        print(f"Validation failed: {e}", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "validate",
+                "file": str(file_path),
+                "schema": str(args.schema) if hasattr(args, "schema") and args.schema else None,
+                "syntax_valid": False,
+                "schema_valid": None,
+                "error": _error_details(e, "syntax"),
+            }, stream=sys.stderr)
+        else:
+            print(f"Validation failed: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "validate",
+                "file": str(file_path),
+                "schema": str(args.schema) if hasattr(args, "schema") and args.schema else None,
+                "error": {
+                    "stage": "unexpected",
+                    "type": e.__class__.__name__,
+                    "message": str(e),
+                },
+            }, stream=sys.stderr)
+        else:
+            print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -121,22 +244,49 @@ def schema_convert_command(args) -> None:
     """Convert KVL file through schema validation with type conversion."""
     input_path = Path(args.input)
     schema_path = Path(args.schema)
-    
+    json_output = bool(getattr(args, "json", False))
+
     if not input_path.exists():
-        print(f"Error: Input file '{input_path}' does not exist", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "schema-convert",
+                "input": str(input_path),
+                "schema": str(schema_path),
+                "error": {
+                    "stage": "input",
+                    "type": "FileNotFoundError",
+                    "message": f"Input file '{input_path}' does not exist",
+                },
+            }, stream=sys.stderr)
+        else:
+            print(f"Error: Input file '{input_path}' does not exist", file=sys.stderr)
         sys.exit(1)
-    
+
     if not schema_path.exists():
-        print(f"Error: Schema file '{schema_path}' does not exist", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "schema-convert",
+                "input": str(input_path),
+                "schema": str(schema_path),
+                "error": {
+                    "stage": "schema-discovery",
+                    "type": "FileNotFoundError",
+                    "message": f"Schema file '{schema_path}' does not exist",
+                },
+            }, stream=sys.stderr)
+        else:
+            print(f"Error: Schema file '{schema_path}' does not exist", file=sys.stderr)
         sys.exit(1)
-    
+
     try:
         # Load schema
         schema = Schema.from_file(str(schema_path))
-        
+
         # Load and validate data with type conversion
         validated_data = schema.load(str(input_path))
-        
+
         # Output based on format
         if args.output:
             output_path = Path(args.output)
@@ -146,53 +296,127 @@ def schema_convert_command(args) -> None:
             elif output_path.suffix.lower() == '.kvl':
                 schema.dump(validated_data, str(output_path))
             else:
-                print(f"Error: Unsupported output format '{output_path.suffix}'", file=sys.stderr)
+                if json_output:
+                    _emit_json({
+                        "ok": False,
+                        "command": "schema-convert",
+                        "input": str(input_path),
+                        "schema": str(schema_path),
+                        "error": {
+                            "stage": "output-format",
+                            "type": "ValueError",
+                            "message": f"Unsupported output format '{output_path.suffix}'",
+                        },
+                    }, stream=sys.stderr)
+                else:
+                    print(f"Error: Unsupported output format '{output_path.suffix}'", file=sys.stderr)
                 sys.exit(1)
-            print(f"Schema-validated data written to '{output_path}'")
+            if json_output:
+                _emit_json({
+                    "ok": True,
+                    "command": "schema-convert",
+                    "input": str(input_path),
+                    "schema": str(schema_path),
+                    "output": str(output_path),
+                    "output_format": output_path.suffix.lower().lstrip("."),
+                })
+            else:
+                print(f"Schema-validated data written to '{output_path}'")
         else:
-            # Output to stdout as JSON by default
-            json.dump(validated_data, sys.stdout, indent=2, default=str)
-            print()
-            
+            if json_output:
+                _emit_json({
+                    "ok": True,
+                    "command": "schema-convert",
+                    "input": str(input_path),
+                    "schema": str(schema_path),
+                    "output": None,
+                    "output_format": "json",
+                    "data": validated_data,
+                })
+            else:
+                # Output to stdout as JSON by default
+                json.dump(validated_data, sys.stdout, indent=2, default=str)
+                print()
+
     except KvlSchemaError as e:
-        print(f"Schema error: {e}", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "schema-convert",
+                "input": str(input_path),
+                "schema": str(schema_path),
+                "error": _error_details(e, "schema"),
+            }, stream=sys.stderr)
+        else:
+            print(f"Schema error: {e}", file=sys.stderr)
         sys.exit(1)
     except KvlValidationError as e:
-        print(f"Validation failed: {e}", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "schema-convert",
+                "input": str(input_path),
+                "schema": str(schema_path),
+                "error": _error_details(e, "schema"),
+            }, stream=sys.stderr)
+        else:
+            print(f"Validation failed: {e}", file=sys.stderr)
         sys.exit(1)
     except kvl.KvlError as e:
-        print(f"KVL error: {e}", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "schema-convert",
+                "input": str(input_path),
+                "schema": str(schema_path),
+                "error": _error_details(e, "syntax"),
+            }, stream=sys.stderr)
+        else:
+            print(f"KVL error: {e}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        if json_output:
+            _emit_json({
+                "ok": False,
+                "command": "schema-convert",
+                "input": str(input_path),
+                "schema": str(schema_path),
+                "error": {
+                    "stage": "unexpected",
+                    "type": e.__class__.__name__,
+                    "message": str(e),
+                },
+            }, stream=sys.stderr)
+        else:
+            print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 def format_command(args) -> None:
     """Format a KVL file."""
     file_path = Path(args.file)
-    
+
     if not file_path.exists():
         print(f"Error: File '{file_path}' does not exist", file=sys.stderr)
         sys.exit(1)
-    
+
     try:
         # First, try to detect the original format
         with open(file_path, 'r') as f:
             file_content = f.read()
-        
+
         # Parse header to get original config
         original_config = kvl.parse_header(file_content)
-        
+
         # Override with command line separator if specified
         if hasattr(args, 'separator') and args.separator:
             config = kvl.auto_config_for_separator(args.separator)
         else:
             config = original_config
-        
+
         # Parse the data
         data = kvl.loads(file_content)
-        
+
         if args.output:
             output_path = Path(args.output)
             with open(output_path, 'w') as f:
@@ -206,7 +430,7 @@ def format_command(args) -> None:
         else:
             # Output to stdout by default
             kvl.dump(data, sys.stdout, config=config, include_header=bool(config))
-            
+
     except kvl.KvlError as e:
         print(f"Format failed: {e}", file=sys.stderr)
         sys.exit(1)
@@ -304,23 +528,24 @@ def main() -> None:
         description='KVL (Key-Value Language) command line tool'
     )
     parser.add_argument('--version', action='version', version=f'kvl {kvl.__version__}')
-    
+
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
-    
+
     # Convert command
     convert_parser = subparsers.add_parser('convert', help='Convert between KVL and other formats')
     convert_parser.add_argument('input', help='Input file (supports .kvl, .json)')
     convert_parser.add_argument('output', nargs='?', help='Output file (supports .kvl, .json) - defaults to stdout')
     convert_parser.add_argument('-s', '--separator', help='KVL separator to use (e.g., =, :, ->, :=)')
     convert_parser.set_defaults(func=convert_command)
-    
+
     # Validate command
     validate_parser = subparsers.add_parser('validate', help='Validate a KVL file')
     validate_parser.add_argument('file', help='KVL file to validate')
     validate_parser.add_argument('-s', '--separator', help='KVL separator to use (e.g., =, :, ->, :=)')
     validate_parser.add_argument('--schema', help='Schema file for validation (.schema.kvl)')
+    validate_parser.add_argument('--json', action='store_true', help='Emit machine-readable JSON diagnostics')
     validate_parser.set_defaults(func=validate_command)
-    
+
     # Format command
     format_parser = subparsers.add_parser('format', help='Format a KVL file')
     format_parser.add_argument('file', help='KVL file to format')
@@ -328,7 +553,7 @@ def main() -> None:
     format_parser.add_argument('-i', '--in-place', action='store_true', help='Format file in place')
     format_parser.add_argument('-s', '--separator', help='KVL separator to use (e.g., =, :, ->, :=)')
     format_parser.set_defaults(func=format_command)
-    
+
     # Parse-raw command
     parse_raw_parser = subparsers.add_parser('parse-raw', help='Parse KVL file to raw categorical JSON')
     parse_raw_parser.add_argument('input', help='Input KVL file')
@@ -344,20 +569,21 @@ def main() -> None:
     merge_parser.add_argument('files', nargs='+', help='KVL files to merge')
     merge_parser.add_argument('-o', '--output', help='Output file (default: stdout)')
     merge_parser.set_defaults(func=merge_command)
-    
+
     # Schema convert command
     schema_parser = subparsers.add_parser('schema-convert', help='Convert KVL file with schema validation and type conversion')
     schema_parser.add_argument('input', help='Input KVL file')
     schema_parser.add_argument('schema', help='Schema file (.schema.kvl)')
     schema_parser.add_argument('-o', '--output', help='Output file (.json or .kvl) - defaults to JSON stdout')
+    schema_parser.add_argument('--json', action='store_true', help='Emit machine-readable JSON diagnostics')
     schema_parser.set_defaults(func=schema_convert_command)
-    
+
     args = parser.parse_args()
-    
+
     if not args.command:
         parser.print_help()
         sys.exit(1)
-    
+
     args.func(args)
 
 

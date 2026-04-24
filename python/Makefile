@@ -22,5 +22,4 @@ clean:
 
 # Run linting
 lint:
-	-python -m flake8 kvl/ tests/
-	-python -m black --check kvl/ tests/
+	python -m compileall kvl tests

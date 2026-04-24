@@ -3,12 +3,21 @@
   "version": "0.1.0",
   "description": "Key-Value Language (KVL) parser and serializer",
   "type": "module",
+  "license": "CC0-1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shcv/kvl"
+  },
   "main": "./src/index.js",
   "exports": {
     ".": {
       "import": "./src/index.js"
     }
   },
+  "files": [
+    "README.md",
+    "src"
+  ],
   "bin": {
     "kvl": "./src/cli.js"
   },

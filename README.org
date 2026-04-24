@@ -1,132 +1,258 @@
 #+TITLE: KVL - Key-Value Language
-#+SUBTITLE: Flexible Configuration Format with Mathematical Merge Operations
+#+SUBTITLE: Small configuration files that merge cleanly
 
 * Overview
 
-KVL (Key-Value Language) is a minimalist configuration format derived from CCL (Categorical Configuration Language) by Dmitrii Kovanikov (chshersh). It emphasizes three core principles:
+KVL is a small, indentation-based configuration format for settings that need
+to be read by people, loaded by programs, layered across environments, and
+validated before use.
 
-1. *Simplicity* - Clean syntax with minimal boilerplate
-2. *Composability* - Mathematical merge operations with semigroup properties  
-3. *Mathematical Soundness* - Associative merging where =(A + B) + C = A + (B + C)=
+The everyday interface is intentionally plain:
 
-** Language Specification
+- =load= and =loads= parse KVL into normal dictionaries or objects.
+- =dump= and =dumps= write normal dictionaries or objects back to KVL.
+- Repeated keys become lists in the public API.
+- Schema validation is optional and can convert strings into typed values.
+- The lower-level representation is available for implementers, but most users
+  should not need it.
 
-The complete language specification is maintained in the [[file:spec/][spec/]] directory:
-- [[file:spec/docs/language-specification.org][Language Specification]] - Complete syntax and semantics
-- [[file:spec/docs/schema-guide.org][Schema System Guide]] - Validation system specification
-- [[file:spec/docs/implementations.org][Implementation Guide]] - Guidelines for implementers
-
-** Key Features
-
-- *Field-oriented schema system* - Validate data based on field names, not rigid object structures
-- *Associative merging* - Combine configurations predictably
-- *Categorical structure* - Repeated keys create nested categorical mappings
-- *Multiple separators* - Support for =, :, ->, := and custom separators
-- *Multiline values* - Indented continuation blocks for structured or plain text values
-
-* Quick Example
+* Example
 
 #+begin_src kvl
 /= Comments start with /=
 
-/= Simple key-value pairs (strings by default)
-name = John Doe
-age = 30
-active = true
+name = checkout
+environment = production
 
-/= Nested objects via indentation
-server = 
-    host = localhost
-    port = 8080
-    ssl = true
+server =
+  host = app.example.com
+  port = 8080
 
-/= Repeated keys create categorical structure (NOT arrays)
+features =
+  search = true
+  recommendations = false
+
+tags = web
+tags = api
+tags = public
+#+end_src
+
+In Python:
+
+#+begin_src python
+import kvl
+
+config = kvl.loads("""
+name = checkout
+server =
+  host = app.example.com
+  port = 8080
+tags = web
+tags = api
+""")
+
+assert config["server"]["host"] == "app.example.com"
+assert config["tags"] == ["web", "api"]
+#+end_src
+
+KVL leaves scalar values as strings by default. Use a schema when an application
+needs typed values such as integers, booleans, dates, or constrained strings.
+
+* Syntax
+
+KVL has three main forms.
+
+** Key-Value Pairs
+
+#+begin_src kvl
+name = checkout
+port = 8080
+debug = false
+#+end_src
+
+Values do not need quotes. The parser preserves them as strings unless schema
+validation converts them.
+
+** Nested Objects
+
+#+begin_src kvl
+server =
+  host = localhost
+  port = 8080
+#+end_src
+
+Indentation creates nested data. A key with no value introduces the nested
+block below it.
+
+** Lists
+
+The public API treats repeated keys as lists:
+
+#+begin_src kvl
 tags = web
 tags = api
 tags = production
-/= Categorical form: tags = { web = {}, api = {}, production = {} }
-/= Note: Implementations may provide convenience functions to convert to arrays
 #+end_src
 
-** Configuration Headers
+#+begin_src json
+{
+  "tags": ["web", "api", "production"]
+}
+#+end_src
 
-KVL files can specify processing options via headers:
+KVL also supports header-declared list markers when that reads better for long
+lists:
 
 #+begin_src kvl
-#= kvl 1.0 compact
-#: kvl 1.0 
-#-> kvl 1.0 space-around
+#= kvl 1.0 -
+
+dependencies =
+  - postgresql
+  - redis
+  - s3
 #+end_src
 
-** Merge Semantics
+* Configuration Merging
 
-KVL configurations are semigroups with associative merge operations:
+KVL is designed for layered configuration: defaults, deployment settings,
+environment overrides, and local files can be combined in a predictable way.
 
-- *Simple values* - Later overrides earlier
-- *Nested objects* - Recursive merge
-- *Repeated keys* - Merged into nested categorical structure
-- *Mathematical property* - =(A + B) + C = A + (B + C)=
+#+begin_src kvl
+/= base.kvl
+service =
+  host = localhost
+  port = 8080
 
-* Schema System
+tags = web
+tags = api
+#+end_src
 
-The KVL schema system provides flexible, recursive validation using field-oriented matching. See the [[file:spec/docs/schema-guide.org][Schema Guide]] in the specification repository for complete documentation.
+#+begin_src kvl
+/= production.kvl
+service =
+  host = app.example.com
+  tls = true
 
-** Core Concepts
+tags = production
+#+end_src
 
-- *Field-oriented validation* - Field specs apply based on field names, not object structure
-- *Recursive matching* - Schema validation traverses data recursively
-- *Hierarchical scoping* - Context-specific specs override global ones
-- *Open/closed schemas* - Control validation coverage
-- *Required field validation* - Per-field and schema-level requirements
+Merging those files preserves shared structure and adds new information:
 
-** Example Schema
+#+begin_src json
+{
+  "service": {
+    "host": ["localhost", "app.example.com"],
+    "port": "8080",
+    "tls": "true"
+  },
+  "tags": ["web", "api", "production"]
+}
+#+end_src
+
+This is useful when configuration layers should compose without silently losing
+values. Applications that want single-winner override behavior can apply that
+policy after parsing or schema validation; KVL keeps the merge step lossless.
+
+* Schemas
+
+Schemas are optional. They validate fields and can convert KVL strings into
+application types.
 
 #+begin_src kvl
 #= kvl 1.0 schema open optional
 
-/= Global field specifications (apply anywhere)
-population = int
-capital = string
-median_income = int
+port =
+  type = int
+  min = 1
+  max = 65535
 
-/= Context-specific validation
-server = 
-    port = 
-        type = int
-        min = 8000
-        max = 9000
-    ssl = bool
+tls = bool
+tags = list
 #+end_src
+
+Python schema usage:
+
+#+begin_src python
+from kvl import Schema
+
+schema = Schema.from_file("server.schema.kvl")
+config = schema.load("server.kvl")
+
+assert isinstance(config["service"]["port"], int)
+#+end_src
+
+See [[file:spec/docs/schema-guide.org][the schema guide]] for the full validation model.
+
+* Command Line
+
+The Python package provides the most complete CLI today:
+
+#+begin_src shell
+kvl validate config.kvl
+kvl validate config.kvl --schema config.schema.kvl
+kvl validate config.kvl --schema config.schema.kvl --json
+kvl schema-convert config.kvl config.schema.kvl --json
+kvl format config.kvl
+kvl merge base.kvl production.kvl local.kvl
+kvl convert config.kvl config.json
+#+end_src
+
+The schema-aware CLI commands accept =--json= to emit stable machine-readable
+status objects. The result envelope includes the input file, schema file, and
+structured error details such as the validation stage and field path when
+available.
+
+Other implementations also expose parser or conversion CLIs for conformance
+testing and language-specific use.
 
 * Implementations
 
-** Production Ready
-- *[[file:python/][python]]* - Python implementation with complete API, schema validation, and merge operations
-- *[[file:go/][go]]* - Go implementation with Parse/Load API and compact/expand transforms
+- [[file:python/][python/]] - Reference implementation with parsing, serialization, merging, schemas, and CLI commands.
+- [[file:javascript/][javascript/]] - JavaScript parser, serializer, merge helpers, and CLI.
+- [[file:go/][go/]] - Go parser, serializer, merge helpers, and CLI.
+- [[file:zig/][zig/]] - Zig parser, serializer, merge helpers, and CLI.
 
-** Working Implementations
-- *[[file:zig/][zig]]* - Zig implementation with parser, serializer, and merge operations
-- *[[file:javascript/][javascript]]* - JavaScript implementation with complete API and merge operations
+Shared fixtures live in [[file:fixtures/][fixtures/]], and the cross-language test
+harness lives in [[file:conformance/][conformance/]].
 
-* Repository Structure
+* Editor Support
 
-- [[file:spec/][spec/]] - Language specification and documentation
-- [[file:python/][python/]] - Python implementation (reference)
-- [[file:go/][go/]] - Go implementation
-- [[file:zig/][zig/]] - Zig implementation
-- [[file:javascript/][javascript/]] - JavaScript implementation
-- [[file:fixtures/][fixtures/]] - Canonical test fixtures shared across implementations
-- [[file:conformance/][conformance/]] - Cross-implementation conformance test harness
-- [[file:emacs/][emacs/]] - Emacs major mode for KVL
-- [[file:vim/][vim/]] - Vim/Neovim ftplugin for KVL
-- [[file:vscode/][vscode/]] - VS Code extension for KVL
-- [[file:tree-sitter-kvl/][tree-sitter-kvl/]] - Tree-sitter grammar for KVL
-- [[file:kvq/][kvq/]] - KVL query tool
+This repository includes editor support that still needs release packaging:
+
+- [[file:vscode/][vscode/]] - VS Code language extension.
+- [[file:vim/][vim/]] - Vim/Neovim syntax, indentation, filetype, and ftplugin files.
+- [[file:emacs/][emacs/]] - Emacs major mode, schema helpers, and Flycheck integration.
+- [[file:tree-sitter-kvl/][tree-sitter-kvl/]] - Tree-sitter grammar and queries.
+
+* Specification
+
+The landing README covers the public user interface. Deeper design notes,
+implementation guidance, and formal merge details live under [[file:spec/][spec/]]:
+
+- [[file:spec/docs/language-specification.org][Language specification]]
+- [[file:spec/docs/schema-guide.org][Schema guide]]
+- [[file:spec/docs/implementation-guide.org][Implementation guide]]
+- [[file:spec/docs/mathematical-properties.org][Mathematical properties]]
+
+* Development
+
+Run implementation tests from each implementation directory:
+
+#+begin_src shell
+cd python && python -m pytest tests/
+cd javascript && npm test
+cd go && go test
+cd zig && zig build test
+#+end_src
+
+Run shared conformance tests from the repository root:
+
+#+begin_src shell
+cd conformance
+python run.py --core
+python run.py
+#+end_src
 
 * License
 
-[License information]
-
-* Contributing
-
-[Contributing guidelines]
+KVL is released under CC0-1.0.

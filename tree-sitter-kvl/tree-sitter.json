@@ -12,10 +12,10 @@
   ],
   "metadata": {
     "version": "0.1.0",
-    "license": "MIT",
+    "license": "CC0-1.0",
     "description": "Tree-sitter grammar for KVL (Key-Value Language)",
     "links": {
-      "repository": "https://github.com/kvl-lang/tree-sitter-kvl"
+      "repository": "https://github.com/shcv/kvl"
     }
   }
 }
