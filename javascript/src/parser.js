@@ -225,6 +225,92 @@ function _collectMultilineValue(lines, startIdx, parentIndent) {
 }
 
 /**
+ * @param {string} line
+ * @returns {number}
+ */
+function _lineIndent(line) {
+  return line.length - line.trimStart().length;
+}
+
+/**
+ * Capture a deeper-indented child block if one exists.
+ * @param {string[]} lines
+ * @param {number} startIdx
+ * @param {number} parentIndent
+ * @returns {[string, number]}
+ */
+function _captureIndentedBlock(lines, startIdx, parentIndent) {
+  if (startIdx >= lines.length) return ['', startIdx];
+
+  let probeIdx = startIdx;
+  while (probeIdx < lines.length && !lines[probeIdx].trim()) probeIdx++;
+
+  if (probeIdx >= lines.length || _lineIndent(lines[probeIdx]) <= parentIndent) {
+    return ['', startIdx];
+  }
+
+  return _collectMultilineValue(lines, startIdx, parentIndent);
+}
+
+/**
+ * Classify a captured multiline block as nested KVL, plain text, or mixed.
+ * @param {string} value
+ * @param {KvlConfig} config
+ * @returns {'scalar'|'nested'|'text'|'mixed'}
+ */
+function _classifyMultilineBlock(value, config) {
+  if (!value.includes('\n')) return 'scalar';
+
+  const nonBlank = value.split('\n').filter(line => line.trim());
+  if (!nonBlank.length) return 'text';
+
+  const minIndent = Math.min(...nonBlank.map(_lineIndent));
+  const baseLines = nonBlank.filter(line => _lineIndent(line) === minIndent);
+
+  let linesWithSep = 0;
+  for (const line of baseLines) {
+    const content = line.trimStart();
+    const hasSep = _findUnescapedSeparator(content, config.separator) !== -1;
+    const hasMarker = !!(config.listMarkers && _isListMarker(content, 0, config));
+    if (hasSep || hasMarker) linesWithSep++;
+  }
+
+  if (linesWithSep === baseLines.length) return 'nested';
+  if (linesWithSep === 0) return 'text';
+  return 'mixed';
+}
+
+/**
+ * Treat inline list-item content with children as the bare-marker form.
+ * @param {string} itemContent
+ * @param {string} childBlock
+ * @returns {string}
+ */
+function _desugarListItemBlock(itemContent, childBlock) {
+  const blockLines = childBlock.split('\n');
+  let childPrefix = '';
+  for (const line of blockLines) {
+    if (line.trim()) {
+      childPrefix = line.slice(0, _lineIndent(line));
+      break;
+    }
+  }
+  return '\n' + childPrefix + itemContent + childBlock;
+}
+
+/**
+ * Only desugar inline list items that already carry a real inline payload.
+ * @param {string} itemContent
+ * @param {string} separator
+ * @returns {boolean}
+ */
+function _shouldDesugarListItemBlock(itemContent, separator) {
+  const sepPos = _findUnescapedSeparator(itemContent, separator);
+  if (sepPos === -1) return true;
+  return !!itemContent.slice(sepPos + separator.length).trim();
+}
+
+/**
  * Core key-value parser.
  * @param {string} text
  * @param {KvlConfig} config
@@ -252,8 +338,25 @@ function _parseKvs(text, config, allowAnonymousLists = false, depth = 0) {
 
     // List marker handling
     if (firstCharPos < line.length && _isListMarker(line, firstCharPos, config)) {
-      const listItemContent = line.slice(firstCharPos + 1).trimStart();
-      const itemSepPos = _findUnescapedSeparator(listItemContent, config.separator);
+      let listItemContent = line.slice(firstCharPos + 1).trimStart();
+      const parentIndent = _lineIndent(line);
+      const [childBlock, newI] = _captureIndentedBlock(lines, i + 1, parentIndent);
+      if (childBlock) {
+        if (!listItemContent) {
+          listItemContent = childBlock;
+          i = newI - 1;
+        } else if (_shouldDesugarListItemBlock(listItemContent, config.separator)) {
+          listItemContent = _desugarListItemBlock(listItemContent, childBlock);
+          i = newI - 1;
+        } else if (currentListKey) {
+          listItemContent = listItemContent + childBlock;
+          i = newI - 1;
+        }
+      }
+
+      const itemSepPos = listItemContent.startsWith('\n')
+        ? -1
+        : _findUnescapedSeparator(listItemContent, config.separator);
 
       if (currentListKey) {
         result.push({ [currentListKey]: listItemContent });
@@ -262,11 +365,12 @@ function _parseKvs(text, config, allowAnonymousLists = false, depth = 0) {
           const itemKey = listItemContent.slice(0, itemSepPos).trim();
           let itemValue = listItemContent.slice(itemSepPos + config.separator.length).trim();
 
-          if (!itemValue && i + 1 < lines.length) {
-            const nextLine = lines[i + 1] || '';
-            if (nextLine && (nextLine.startsWith(' ') || nextLine.startsWith('\t'))) {
-              const parentIndent = line.length - line.trimStart().length;
-              const [mlValue, newI] = _collectMultilineValue(lines, i + 1, parentIndent);
+          if (!itemValue && childBlock) {
+            itemValue = childBlock;
+            i = newI - 1;
+          } else if (!itemValue) {
+            const [mlValue, newI] = _captureIndentedBlock(lines, i + 1, parentIndent);
+            if (mlValue) {
               itemValue = mlValue;
               i = newI - 1;
             }
@@ -283,7 +387,7 @@ function _parseKvs(text, config, allowAnonymousLists = false, depth = 0) {
     }
 
     // Normal line parsing
-    const lineIndent = line.length - line.trimStart().length;
+    const lineIndent = _lineIndent(line);
     const sepPos = _findUnescapedSeparator(line, config.separator);
 
     // Multiline continuation (indented line without separator)
@@ -314,31 +418,23 @@ function _parseKvs(text, config, allowAnonymousLists = false, depth = 0) {
     }
 
     // Multiline value collection
-    if (!valuePart && i + 1 < lines.length) {
-      const nextLine = lines[i + 1] || '';
-      if (nextLine && (nextLine.startsWith(' ') || nextLine.startsWith('\t'))) {
-        const parentIndent = line.length - line.trimStart().length;
-        const [mlValue, newI] = _collectMultilineValue(lines, i + 1, parentIndent);
+    const parentIndent = _lineIndent(line);
+    if (!valuePart) {
+      const [mlValue, newI] = _captureIndentedBlock(lines, i + 1, parentIndent);
+      if (mlValue) {
         valuePart = mlValue;
         i = newI - 1;
       }
-    } else if (valuePart && i + 1 < lines.length) {
+    } else {
       // Valued key with indented children → continuation text (W001)
-      const nextLine = lines[i + 1] || '';
-      if (nextLine && (nextLine.startsWith(' ') || nextLine.startsWith('\t'))) {
-        const nextIndent = nextLine.length - nextLine.trimStart().length;
-        const parentIndent = line.length - line.trimStart().length;
-        if (nextIndent > parentIndent) {
-          const [contValue, newI] = _collectMultilineValue(lines, i + 1, parentIndent);
-          if (contValue) {
-            _emitDiagnostic(config, 'W001',
-              'Valued key with continuation: indented lines after ' +
-              'a valued key are treated as continuation text',
-              i + 1);
-            valuePart = valuePart + contValue;
-            i = newI - 1;
-          }
-        }
+      const [contValue, newI] = _captureIndentedBlock(lines, i + 1, parentIndent);
+      if (contValue) {
+        _emitDiagnostic(config, 'W001',
+          'Valued key with continuation: indented lines after ' +
+          'a valued key are treated as continuation text',
+          i + 1);
+        valuePart = valuePart + contValue;
+        i = newI - 1;
       }
     }
 
@@ -368,10 +464,10 @@ function _parseKvs(text, config, allowAnonymousLists = false, depth = 0) {
  */
 function _isListMarker(line, pos, config) {
   if (!config.listMarkers || pos >= line.length) return false;
+  const suffix = line.slice(pos + 1);
   return (
     config.listMarkers.includes(line[pos]) &&
-    pos + 1 < line.length &&
-    (line[pos + 1] === ' ' || line[pos + 1] === '\t')
+    (!suffix || suffix[0] === ' ' || suffix[0] === '\t')
   );
 }
 
@@ -415,41 +511,21 @@ function _processValue(value, config, depth = 0) {
   // Only re-parse as nested KVL if the value is multiline (from indented
   // blocks).  Single-line values are always literal leaves — they must NOT
   // be re-split on the separator.
-  if (!value.includes('\n')) {
+  const blockKind = _classifyMultilineBlock(value, config);
+
+  if (blockKind === 'scalar') {
     return { [value]: {} };
   }
 
-  // Find base level = minimum indent among non-blank lines
-  const lines = value.split('\n');
-  const nonBlank = lines.filter(l => l.trim());
-  if (!nonBlank.length) return { [value]: {} };
-
-  const minIndent = Math.min(...nonBlank.map(l => l.length - l.trimStart().length));
-
-  // Collect base-level lines (at minimum indent)
-  const baseLines = nonBlank.filter(l => l.length - l.trimStart().length === minIndent);
-
-  // Check how many base-level lines have separators or list markers
-  let linesWithSep = 0;
-  for (const line of baseLines) {
-    const content = line.trimStart();
-    const hasSep = _findUnescapedSeparator(content, config.separator) !== -1;
-    const hasMarker = config.listMarkers && _isListMarker(content, 0, config);
-    if (hasSep || hasMarker) linesWithSep++;
-  }
-
-  if (linesWithSep === baseLines.length) {
-    // ALL base-level lines have separators → nested KVL
+  if (blockKind === 'nested') {
     const nestedKvs = _parseKvs(value, config, true, depth + 1);
     return _buildModel(nestedKvs, config, depth + 1);
   }
 
-  if (linesWithSep === 0) {
-    // NONE have separators → plain text (no warning)
+  if (blockKind === 'text') {
     return { [value]: {} };
   }
 
-  // SOME have separators → plain text + W002 warning
   _emitDiagnostic(config, 'W002',
     'Mixed continuation content: some base-level lines have separators ' +
     'but not all; block treated as plain text');

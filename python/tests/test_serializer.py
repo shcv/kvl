@@ -160,8 +160,37 @@ class TestFormattingOptions:
         
         serialized = kvl.dumps(data)
         reparsed = kvl.loads(serialized)
-        
+
         assert reparsed == data
+
+    def test_public_format_serializes_scalars_directly(self):
+        """Test additive public-format mode for normal scalar output."""
+        data = {"name": "test", "port": 8080, "enabled": True}
+
+        result = kvl.dumps(data, public_format=True)
+
+        assert "name = test" in result
+        assert "port = 8080" in result
+        assert "enabled = True" in result
+        assert "test =" not in result
+        assert kvl.loads(result) == {"name": "test", "port": "8080", "enabled": "True"}
+
+    def test_public_format_uses_repeated_keys_for_string_lists(self):
+        """Test additive public-format mode for repeated-key lists."""
+        data = {"tags": ["web", "api", "public"]}
+
+        result = kvl.dumps(data, public_format=True)
+
+        assert result.count("tags = ") == 3
+        assert "web =" not in result
+        assert kvl.loads(result) == data
+
+    def test_public_format_requires_list_markers_for_complex_lists(self):
+        """Test additive public-format mode rejects object lists without markers."""
+        data = {"servers": [{"name": "web1"}, {"name": "web2"}]}
+
+        with pytest.raises(kvl.KvlSerializeError):
+            kvl.dumps(data, public_format=True)
 
 
 class TestListMarkerSerialization:
@@ -232,10 +261,30 @@ class TestListMarkerSerialization:
         
         result = kvl.dumps(data, config=config)
         
-        assert "- name = web1" in result
+        assert "\n  -\n    name = web1\n" in result
         assert "port = 80" in result
-        assert "- name = web2" in result  
+        assert "\n  -\n    name = web2\n" in result
         assert "port = 8080" in result
+
+    def test_nested_lists_roundtrip_with_list_markers(self):
+        """Test nested list roundtrip using bare marker child blocks."""
+        data = {"groups": [["a", "b"], ["c"]]}
+        config = kvl.KvlConfig(list_markers="-")
+
+        serialized = kvl.dumps(data, config=config, include_header=True)
+
+        assert "\n  -\n    - a\n    - b\n" in serialized
+        assert kvl.loads(serialized) == data
+
+    def test_list_of_objects_roundtrip_with_list_markers(self):
+        """Test multi-field object list roundtrip using bare marker child blocks."""
+        data = {"servers": [{"name": "web1", "port": "80"}, {"name": "web2", "port": "8080"}]}
+        config = kvl.KvlConfig(list_markers="-")
+
+        serialized = kvl.dumps(data, config=config, include_header=True)
+
+        assert "\n  -\n    name = web1\n    port = 80\n" in serialized
+        assert kvl.loads(serialized) == data
     
     def test_roundtrip_with_list_markers(self):
         """Test complete roundtrip using list markers."""

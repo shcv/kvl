@@ -300,6 +300,83 @@ describe('List marker parsing', () => {
     });
   });
 
+  it('parses yaml-style nested scalar lists', () => {
+    const content = `#= kvl 1.0 -
+        groups =
+          -
+            - a
+            - b
+          -
+            - c
+    `;
+    expect(loads(content)).toEqual({ groups: [['a', 'b'], ['c']] });
+  });
+
+  it('treats inline nested-list sugar like the bare-marker form', () => {
+    const sugar = `#= kvl 1.0 -
+        groups =
+          - - a
+            - b
+          - - c
+            - d
+    `;
+    const bare = `#= kvl 1.0 -
+        groups =
+          -
+            - a
+            - b
+          -
+            - c
+            - d
+    `;
+    expect(parse(sugar)).toEqual(parse(bare));
+    expect(loads(sugar)).toEqual({ groups: [['a', 'b'], ['c', 'd']] });
+  });
+
+  it('parses yaml-style list of objects', () => {
+    const content = `#= kvl 1.0 -
+        servers =
+          -
+            name = web1
+            port = 80
+          -
+            name = web2
+            port = 81
+    `;
+    expect(loads(content)).toEqual({
+      servers: [
+        { name: 'web1', port: '80' },
+        { name: 'web2', port: '81' },
+      ],
+    });
+  });
+
+  it('treats inline object-list sugar like the bare-marker form', () => {
+    const sugar = `#= kvl 1.0 -
+        servers =
+          - name = web1
+            port = 80
+          - name = web2
+            port = 81
+    `;
+    const bare = `#= kvl 1.0 -
+        servers =
+          -
+            name = web1
+            port = 80
+          -
+            name = web2
+            port = 81
+    `;
+    expect(parse(sugar)).toEqual(parse(bare));
+    expect(loads(sugar)).toEqual({
+      servers: [
+        { name: 'web1', port: '80' },
+        { name: 'web2', port: '81' },
+      ],
+    });
+  });
+
   it('handles list items with nested objects', () => {
     const content = `#= kvl 1.0 -
         servers =

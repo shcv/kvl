@@ -35,8 +35,8 @@ def _determine_list_marker(list_marker: Optional[str], config: KvlConfig) -> Opt
     return None
 
 
-def dumps(data: Dict[str, KvlValue], config: Optional[KvlConfig] = None, include_header: bool = False, 
-          list_marker: Optional[str] = None, **options) -> str:
+def dumps(data: Dict[str, KvlValue], config: Optional[KvlConfig] = None, include_header: bool = False,
+          list_marker: Optional[str] = None, public_format: bool = False, **options) -> str:
     """
     Serialize data to KVL format.
 
@@ -46,6 +46,9 @@ def dumps(data: Dict[str, KvlValue], config: Optional[KvlConfig] = None, include
         include_header: Whether to include KVL header line.
         list_marker: List marker to use for serializing lists. If None, auto-detects from config.list_markers.
                     Set to empty string to force categorical format.
+        public_format: When True, serialize user-facing scalar values directly and
+                      encode string lists as repeated keys when no list marker is
+                      available. Complex list items still require list markers.
         options: Optional serialization parameters.
 
     Returns:
@@ -64,8 +67,14 @@ def dumps(data: Dict[str, KvlValue], config: Optional[KvlConfig] = None, include
     
     # If we have a list marker, serialize with list marker format
     # Otherwise, convert lists to categorical format
-    if effective_list_marker:
-        serializer = KvlSerializer(data, config=config, list_marker=effective_list_marker, **options)
+    if effective_list_marker or public_format:
+        serializer = KvlSerializer(
+            data,
+            config=config,
+            list_marker=effective_list_marker,
+            public_format=public_format,
+            **options,
+        )
     else:
         # Convert lists back to KVL dict format before serialization (categorical format)
         kvl_data = expand(data)
@@ -80,8 +89,8 @@ def dumps(data: Dict[str, KvlValue], config: Optional[KvlConfig] = None, include
 
 
 def dump(
-    data: Dict[str, KvlValue], file_or_path: FileOrPath, config: Optional[KvlConfig] = None, include_header: bool = False, 
-    list_marker: Optional[str] = None, **options
+    data: Dict[str, KvlValue], file_or_path: FileOrPath, config: Optional[KvlConfig] = None, include_header: bool = False,
+    list_marker: Optional[str] = None, public_format: bool = False, **options
 ) -> None:
     """
     Serialize data to KVL format and write to a file.
@@ -92,20 +101,37 @@ def dump(
         config: KVL configuration with separator info.
         include_header: Whether to include KVL header line.
         list_marker: List marker to use for serializing lists. If None, auto-detects from config.list_markers.
+        public_format: When True, serialize user-facing scalar values directly and
+                      encode string lists as repeated keys when no list marker is
+                      available. Complex list items still require list markers.
         options: Optional serialization parameters.
 
     Raises:
         KvlSerializeError: If the data cannot be serialized.
         IOError: If the file cannot be written.
     """
-    serialized = dumps(data, config=config, include_header=include_header, list_marker=list_marker, **options)
+    serialized = dumps(
+        data,
+        config=config,
+        include_header=include_header,
+        list_marker=list_marker,
+        public_format=public_format,
+        **options,
+    )
     handle_write(file_or_path, serialized)
 
 
 class KvlSerializer:
     """Serializer for KVL documents."""
 
-    def __init__(self, data: Dict[str, KvlValue], config: Optional[KvlConfig] = None, indent: str = "  ", list_marker: Optional[str] = None):
+    def __init__(
+        self,
+        data: Dict[str, KvlValue],
+        config: Optional[KvlConfig] = None,
+        indent: str = "  ",
+        list_marker: Optional[str] = None,
+        public_format: bool = False,
+    ):
         """
         Initialize the serializer with data to serialize.
 
@@ -114,11 +140,13 @@ class KvlSerializer:
             config: KVL configuration with separator info.
             indent: String to use for indentation (default 2 spaces to match OCaml).
             list_marker: List marker character to use for serializing lists (e.g., '-').
+            public_format: Whether to serialize compact/public values directly.
         """
         self.data = data
         self.config = config if config is not None else KvlConfig()
         self.indent = indent
         self.list_marker = list_marker
+        self.public_format = public_format
         self.lines: List[str] = []
 
     def serialize(self) -> str:
@@ -186,8 +214,8 @@ class KvlSerializer:
                 self._serialize_dict_value(key, value, indent_str, level)
             elif isinstance(value, list):
                 self._serialize_list_value(key, value, indent_str, level)
-            elif isinstance(value, str):
-                self._serialize_string_value(key, value, indent_str, level)
+            elif _is_scalar(value):
+                self._serialize_scalar_value(key, value, indent_str, level)
             else:
                 raise KvlSerializeError(
                     f"Unsupported value type: {type(value).__name__}"
@@ -204,6 +232,14 @@ class KvlSerializer:
     def _serialize_list_value(self, key: str, value: list, indent_str: str, level: int) -> None:
         """Serialize a list value."""
         if not self.list_marker:
+            if self.public_format:
+                for item in value:
+                    if isinstance(item, (dict, list)):
+                        raise KvlSerializeError(
+                            "Complex list items require a configured list marker in public_format mode."
+                        )
+                    self._serialize_scalar_value(key, item, indent_str, level)
+                return
             raise KvlSerializeError(
                 f"List values are not supported without list markers. "
                 f"Use expand() to convert to categorical format."
@@ -213,6 +249,11 @@ class KvlSerializer:
         self.lines.append(f"{indent_str}{escaped_key}{sep_str}")
         self._serialize_list(value, level + 1)
     
+    def _serialize_scalar_value(self, key: str, value: object, indent_str: str, level: int = 0) -> None:
+        """Serialize a scalar value by stringifying non-string primitives."""
+        text = "null" if value is None else str(value)
+        self._serialize_string_value(key, text, indent_str, level)
+
     def _serialize_string_value(self, key: str, value: str, indent_str: str, level: int = 0) -> None:
         """Serialize a string value."""
         escaped_key = self._escape_text(key)
@@ -290,8 +331,16 @@ class KvlSerializer:
                 # Simple string item
                 escaped_item = self._escape_text(item)
                 self.lines.append(f"{indent_str}{marker_str}{escaped_item}")
+            elif isinstance(item, list):
+                # Nested list item - emit a bare marker and nested list block.
+                self.lines.append(f"{indent_str}{self.list_marker}")
+                self._serialize_list(item, level + 1)
             elif isinstance(item, dict):
                 # Complex dict item - serialize as nested structure under list marker
+                if len(item) != 1:
+                    self.lines.append(f"{indent_str}{self.list_marker}")
+                    self._serialize_dict(item, level + 1)
+                    continue
                 if len(item) == 1:
                     # Single key-value pair - can put on same line
                     key, value = next(iter(item.items()))
@@ -381,3 +430,11 @@ def _escape_separator(text: str, separator: str) -> str:
     if not text or not separator:
         return text
     return text.replace(separator, "\\" + separator)
+
+
+def _is_bool(value: object) -> bool:
+    return isinstance(value, bool)
+
+
+def _is_scalar(value: object) -> bool:
+    return value is None or _is_bool(value) or isinstance(value, (str, int, float))

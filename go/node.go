@@ -93,7 +93,13 @@ func (n *node) toCategorical() any {
 	if n.isList {
 		result := make([]any, len(n.entries))
 		for i, e := range n.entries {
-			if e.value.isEmpty() {
+			if e.key == "" {
+				if e.value.isEmpty() {
+					result[i] = map[string]any{}
+				} else {
+					result[i] = e.value.toCategorical()
+				}
+			} else if e.value.isEmpty() {
 				result[i] = map[string]any{e.key: map[string]any{}}
 			} else {
 				result[i] = map[string]any{e.key: e.value.toCategorical()}
@@ -115,6 +121,35 @@ func (n *node) toCategorical() any {
 func (n *node) toCompacted() any {
 	if n.isEmpty() {
 		return map[string]any{}
+	}
+
+	if n.isList {
+		allScalars := true
+		for _, e := range n.entries {
+			if e.key == "" || !e.value.isEmpty() {
+				allScalars = false
+				break
+			}
+		}
+		if allScalars {
+			result := make([]string, len(n.entries))
+			for i, e := range n.entries {
+				result[i] = e.key
+			}
+			return result
+		}
+
+		result := make([]any, len(n.entries))
+		for i, e := range n.entries {
+			if e.key == "" {
+				result[i] = e.value.toCompacted()
+			} else if e.value.isEmpty() {
+				result[i] = e.key
+			} else {
+				result[i] = map[string]any{e.key: e.value.toCompacted()}
+			}
+		}
+		return result
 	}
 
 	if n.allChildrenEmpty() {

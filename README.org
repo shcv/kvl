@@ -10,7 +10,8 @@ validated before use.
 The everyday interface is intentionally plain:
 
 - =load= and =loads= parse KVL into normal dictionaries or objects.
-- =dump= and =dumps= write normal dictionaries or objects back to KVL.
+- Python, JavaScript, Go, and Zig all expose serializers that can write normal
+  dictionaries or objects back to KVL.
 - Repeated keys become lists in the public API.
 - Schema validation is optional and can convert strings into typed values.
 - The lower-level representation is available for implementers, but most users
@@ -112,6 +113,37 @@ dependencies =
   - s3
 #+end_src
 
+List markers also give KVL a clean nested-list and list-of-object surface:
+
+#+begin_src kvl
+#= kvl 1.0 -
+
+groups =
+  -
+    - a
+    - b
+  -
+    - c
+
+servers =
+  -
+    name = web1
+    port = 80
+  -
+    name = web2
+    port = 81
+#+end_src
+
+The parser also accepts a compact shorthand where the first nested entry stays
+on the list-item line, such as =- - a= or =- name = web1= with additional
+indented child lines. Serializers currently normalize that shorthand back to
+the bare-marker form shown above.
+
+All four current language implementations can round-trip that list-marker
+surface. Python and JavaScript expose the most ergonomic serializer switches;
+Go and Zig use lower-level config or helper APIs for the same nested-list and
+object-list forms.
+
 * Configuration Merging
 
 KVL is designed for layered configuration: defaults, deployment settings,
@@ -203,7 +235,9 @@ structured error details such as the validation stage and field path when
 available.
 
 Other implementations also expose parser or conversion CLIs for conformance
-testing and language-specific use.
+testing and language-specific use. Public serializer options such as direct
+scalar rendering, explicit =null= text for =None=, and list-marker selection are
+currently exposed most clearly through the library APIs.
 
 * Implementations
 

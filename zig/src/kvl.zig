@@ -239,6 +239,26 @@ fn createArray(alloc: Allocator) !*std.ArrayListUnmanaged(Value) {
     return arr;
 }
 
+fn cloneValue(alloc: Allocator, val: Value) !Value {
+    switch (val) {
+        .string => |s| return .{ .string = try alloc.dupe(u8, s) },
+        .array => |arr| {
+            const out = try createArray(alloc);
+            for (arr.items) |item| {
+                try out.append(alloc, try cloneValue(alloc, item));
+            }
+            return .{ .array = out };
+        },
+        .object => |obj| {
+            const out = try createMap(alloc);
+            for (obj.entries.items) |entry| {
+                try out.put(alloc, try alloc.dupe(u8, entry.key), try cloneValue(alloc, entry.value));
+            }
+            return .{ .object = out };
+        },
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Merge operation
 // ---------------------------------------------------------------------------
@@ -605,41 +625,42 @@ pub fn parseWithConfig(alloc: Allocator, input: []const u8, config_opt: ?Config)
         const line_content = line[content_start..];
 
         // Check for list marker
-        if (list_markers.len > 0 and isListMarker(line_content, list_markers)) {
-            const item_content = std.mem.trim(u8, line_content[2..], " \t");
+        if (list_markers.len > 0) {
+            if (listItemContent(line_content, list_markers)) |item_content| {
+                if (current_list_key) |list_key| {
+                    if (list_parent) |lp| {
+                        const next_idx = skipMultilineLines(lines, i + 1, indent);
+                        const child_lines = lines[i + 1 .. next_idx];
+                        const has_child = child_lines.len > 0;
+                        const simple_scalar = item_content.len > 0 and !has_child and
+                            findUnescapedSeparator(item_content, separator) == null and
+                            !isListMarker(item_content, list_markers);
 
-            if (current_list_key) |list_key| {
-                if (list_parent) |lp| {
-                    // List items create an array of single-key objects
-                    if (lp.findIndex(list_key)) |idx| {
-                        const existing = &lp.entries.items[idx].value;
-                        switch (existing.*) {
-                            .array => |arr| {
-                                // Append to existing array
-                                const item_obj = try createMap(alloc);
-                                try item_obj.put(alloc, item_content, .{ .object = try createMap(alloc) });
-                                try arr.append(alloc, .{ .object = item_obj });
-                            },
-                            .object => |obj| {
-                                if (obj.entries.items.len == 0) {
-                                    // Convert empty object to array
-                                    const arr = try createArray(alloc);
-                                    const item_obj = try createMap(alloc);
-                                    try item_obj.put(alloc, item_content, .{ .object = try createMap(alloc) });
-                                    try arr.append(alloc, .{ .object = item_obj });
-                                    existing.* = .{ .array = arr };
-                                } else {
-                                    // Merge into existing object as categorical entry
-                                    try obj.mergeKey(alloc, item_content, .{ .object = try createMap(alloc) });
-                                }
-                            },
-                            else => {},
+                        const arr = try listArrayForKey(alloc, lp, list_key);
+                        if (simple_scalar) {
+                            const item_obj = try createMap(alloc);
+                            try item_obj.put(alloc, item_content, .{ .object = try createMap(alloc) });
+                            try arr.append(alloc, .{ .object = item_obj });
+                        } else {
+                            var synthetic = std.ArrayListUnmanaged(u8){};
+                            defer synthetic.deinit(alloc);
+                            try appendNormalizedSyntheticBlock(alloc, &synthetic, item_content, child_lines);
+                            const parsed = try parseWithConfig(alloc, synthetic.items, config_mut);
+                            const parsed_item: Value = if (parsed.get("item")) |value|
+                                try cloneValue(alloc, value)
+                            else
+                                .{ .object = try createMap(alloc) };
+                            const item_obj = try createMap(alloc);
+                            try item_obj.put(alloc, "", parsed_item);
+                            try arr.append(alloc, .{ .object = item_obj });
                         }
+                        i = if (has_child) next_idx else i + 1;
+                        continue;
                     }
                 }
+                i += 1;
+                continue;
             }
-            i += 1;
-            continue;
         }
 
         // Pop stack to find correct parent
@@ -896,13 +917,73 @@ fn isBlank(line: []const u8) bool {
 }
 
 fn isListMarker(content_line: []const u8, markers: []const u8) bool {
-    if (content_line.len < 2) return false;
+    if (content_line.len == 0) return false;
     for (markers) |m| {
-        if (content_line[0] == m and (content_line[1] == ' ' or content_line[1] == '\t')) {
+        if (content_line[0] != m) continue;
+        if (content_line.len == 1) return true;
+        if (content_line[1] == ' ' or content_line[1] == '\t') {
             return true;
         }
     }
     return false;
+}
+
+fn listItemContent(content_line: []const u8, markers: []const u8) ?[]const u8 {
+    if (!isListMarker(content_line, markers)) return null;
+    if (content_line.len == 1) return "";
+    return std.mem.trim(u8, content_line[2..], " \t");
+}
+
+fn minRawIndentInBlock(lines: []const []const u8) usize {
+    var min_indent: ?usize = null;
+    for (lines) |line| {
+        if (isBlank(line)) continue;
+        const indent = measureRawIndent(line);
+        if (min_indent == null or indent < min_indent.?) {
+            min_indent = indent;
+        }
+    }
+    return min_indent orelse 0;
+}
+
+fn appendNormalizedSyntheticBlock(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), item_content: []const u8, child_lines: []const []const u8) !void {
+    try buf.appendSlice(alloc, "item =\n");
+    const min_indent = minRawIndentInBlock(child_lines);
+
+    if (item_content.len > 0) {
+        try buf.appendSlice(alloc, "    ");
+        try buf.appendSlice(alloc, item_content);
+        try buf.append(alloc, '\n');
+    }
+
+    for (child_lines) |line| {
+        if (isBlank(line)) {
+            try buf.append(alloc, '\n');
+            continue;
+        }
+        const raw_indent = measureRawIndent(line);
+        const trimmed = if (raw_indent >= min_indent) line[min_indent..] else line;
+        try buf.appendSlice(alloc, "    ");
+        try buf.appendSlice(alloc, trimmed);
+        try buf.append(alloc, '\n');
+    }
+}
+
+fn listArrayForKey(alloc: Allocator, parent: *OrderedMap, key: []const u8) !*std.ArrayListUnmanaged(Value) {
+    const idx = parent.findIndex(key) orelse return error.OutOfMemory;
+    const existing = &parent.entries.items[idx].value;
+    switch (existing.*) {
+        .array => |arr| return arr,
+        .object => |obj| {
+            if (obj.entries.items.len == 0) {
+                const arr = try createArray(alloc);
+                existing.* = .{ .array = arr };
+                return arr;
+            }
+            return error.OutOfMemory;
+        },
+        else => return error.OutOfMemory,
+    }
 }
 
 /// Count raw indentation characters (not normalized).
@@ -1188,31 +1269,63 @@ pub fn serialize(alloc: Allocator, val: Value, config_opt: ?Config) ![]const u8 
     return buf.items;
 }
 
-fn serializeValue(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), val: Value, config: Config, level: usize) !void {
+fn serializeValue(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), val: Value, config: Config, level: usize) anyerror!void {
     switch (val) {
         .object => |obj| {
             try serializeObject(alloc, buf, obj, config, level);
         },
         .array => |arr| {
-            // Arrays need to be expanded to categorical format for serialization
-            for (arr.items) |item| {
-                switch (item) {
-                    .string => |s| {
-                        try writeIndent(alloc, buf, level, "  ");
-                        try writeEscaped(alloc, buf, s, config.separator);
-                        try writeSep(alloc, buf, config, true);
-                        try buf.append(alloc, '\n');
-                    },
-                    .object => |child_obj| {
-                        try serializeObject(alloc, buf, child_obj, config, level);
-                    },
-                    .array => |_| {},
-                }
-            }
+            const marker = activeListMarker(config);
+            if (marker.len == 0) return error.ComplexListItemsRequireMarkers;
+            try serializeList(alloc, buf, arr, config, level, marker);
         },
         .string => |s| {
             try writeEscaped(alloc, buf, s, config.separator);
         },
+    }
+}
+
+fn activeListMarker(config: Config) []const u8 {
+    if (config.list_markers.len == 0) return "";
+    return config.list_markers[0..1];
+}
+
+fn serializeList(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), arr: *const std.ArrayListUnmanaged(Value), config: Config, level: usize, marker: []const u8) anyerror!void {
+    for (arr.items) |item| {
+        try writeIndent(alloc, buf, level, "  ");
+        try buf.appendSlice(alloc, marker);
+
+        switch (item) {
+            .string => |s| {
+                try buf.append(alloc, ' ');
+                try writeEscaped(alloc, buf, s, config.separator);
+                try buf.append(alloc, '\n');
+            },
+            .array => |child_arr| {
+                try buf.append(alloc, '\n');
+                try serializeList(alloc, buf, child_arr, config, level + 1, marker);
+            },
+            .object => |obj| {
+                if (obj.entries.items.len == 1) {
+                    const entry = obj.entries.items[0];
+                    if (entry.key.len > 0) switch (entry.value) {
+                        .string => |s| {
+                            if (std.mem.indexOfScalar(u8, s, '\n') == null) {
+                                try buf.append(alloc, ' ');
+                                try writeEscaped(alloc, buf, entry.key, config.separator);
+                                try writeSep(alloc, buf, config, false);
+                                try writeEscaped(alloc, buf, s, config.separator);
+                                try buf.append(alloc, '\n');
+                                continue;
+                            }
+                        },
+                        else => {},
+                    };
+                }
+                try buf.append(alloc, '\n');
+                try serializeObject(alloc, buf, obj, config, level + 1);
+            },
+        }
     }
 }
 
@@ -1230,13 +1343,12 @@ fn minNonBlankIndent(text: []const u8) ?usize {
     return min_indent;
 }
 
-fn serializeObject(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), obj: *const OrderedMap, config: Config, level: usize) !void {
+fn serializeObject(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), obj: *const OrderedMap, config: Config, level: usize) anyerror!void {
     for (obj.entries.items) |entry| {
-        try writeIndent(alloc, buf, level, "  ");
-        try writeEscaped(alloc, buf, entry.key, config.separator);
-
         switch (entry.value) {
             .object => |child| {
+                try writeIndent(alloc, buf, level, "  ");
+                try writeEscaped(alloc, buf, entry.key, config.separator);
                 try writeSep(alloc, buf, config, true);
                 try buf.append(alloc, '\n');
                 if (child.entries.items.len > 0) {
@@ -1244,25 +1356,31 @@ fn serializeObject(alloc: Allocator, buf: *std.ArrayListUnmanaged(u8), obj: *con
                 }
             },
             .array => |arr| {
-                // Expand array back to categorical
-                try writeSep(alloc, buf, config, true);
-                try buf.append(alloc, '\n');
-                for (arr.items) |item| {
-                    switch (item) {
-                        .string => |s| {
-                            try writeIndent(alloc, buf, level + 1, "  ");
-                            try writeEscaped(alloc, buf, s, config.separator);
-                            try writeSep(alloc, buf, config, true);
-                            try buf.append(alloc, '\n');
-                        },
-                        .object => |child_obj| {
-                            try serializeObject(alloc, buf, child_obj, config, level + 1);
-                        },
-                        .array => |_| {},
+                const marker = activeListMarker(config);
+                if (marker.len == 0) {
+                    for (arr.items) |item| {
+                        switch (item) {
+                            .string => |s| {
+                                try writeIndent(alloc, buf, level, "  ");
+                                try writeEscaped(alloc, buf, entry.key, config.separator);
+                                try writeSep(alloc, buf, config, false);
+                                try writeEscaped(alloc, buf, s, config.separator);
+                                try buf.append(alloc, '\n');
+                            },
+                            else => return error.ComplexListItemsRequireMarkers,
+                        }
                     }
+                } else {
+                    try writeIndent(alloc, buf, level, "  ");
+                    try writeEscaped(alloc, buf, entry.key, config.separator);
+                    try writeSep(alloc, buf, config, true);
+                    try buf.append(alloc, '\n');
+                    try serializeList(alloc, buf, arr, config, level + 1, marker);
                 }
             },
             .string => |s| {
+                try writeIndent(alloc, buf, level, "  ");
+                try writeEscaped(alloc, buf, entry.key, config.separator);
                 if (s.len == 0) {
                     try writeSep(alloc, buf, config, true);
                     try buf.append(alloc, '\n');
@@ -1547,7 +1665,7 @@ fn parseJsonValue(alloc: Allocator, input: []const u8, pos: *usize) Allocator.Er
         return error.OutOfMemory;
     } else if (c == 'n' and std.mem.startsWith(u8, input[pos.*..], "null")) {
         pos.* += 4;
-        return .{ .string = try alloc.dupe(u8, "") };
+        return .{ .string = try alloc.dupe(u8, "null") };
     } else if (c == '-' or std.ascii.isDigit(c)) {
         // number -> string
         const start = pos.*;
@@ -1946,6 +2064,66 @@ test "list marker parsing" {
     try std.testing.expectEqualStrings("blue", colors.items[2].object.entries.items[0].key);
 }
 
+test "loads nested lists with bare markers" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try loads(a,
+        \\#= kvl 1.0 -
+        \\groups =
+        \\  -
+        \\    - a
+        \\    - b
+        \\  -
+        \\    - c
+    );
+    const expected = try parseJson(a,
+        \\{"groups":[["a","b"],["c"]]}
+    );
+    try std.testing.expect(val.eql(expected));
+}
+
+test "loads nested lists with inline sugar" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try loads(a,
+        \\#= kvl 1.0 -
+        \\groups =
+        \\  - - a
+        \\    - b
+        \\  - - c
+    );
+    const expected = try parseJson(a,
+        \\{"groups":[["a","b"],["c"]]}
+    );
+    try std.testing.expect(val.eql(expected));
+}
+
+test "loads object lists with inline sugar" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try loads(a,
+        \\#= kvl 1.0 -
+        \\servers =
+        \\  - name = web1
+        \\    port = 80
+        \\  - name = web2
+        \\    port = 81
+    );
+    const expected = try parseJson(a,
+        \\{"servers":[{"name":"web1","port":"80"},{"name":"web2","port":"81"}]}
+    );
+    try std.testing.expect(val.eql(expected));
+}
+
 test "json roundtrip simple" {
     const alloc = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(alloc);
@@ -1964,6 +2142,75 @@ test "json roundtrip simple" {
         \\
     ;
     try std.testing.expectEqualStrings(expected, buf.items);
+}
+
+test "serialize nested lists with list markers" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try parseJson(a,
+        \\{"groups":[["a","b"],["c"]]}
+    );
+    var config = Config{};
+    config.list_markers = "-";
+
+    const serialized = try serialize(a, val, config);
+    try std.testing.expect(std.mem.indexOf(u8, serialized,
+        \\groups =
+        \\  -
+        \\    - a
+        \\    - b
+        \\  -
+        \\    - c
+    ) != null);
+    const roundtrip = try loadsWithConfig(a, serialized, config);
+    try std.testing.expect(roundtrip.eql(val));
+}
+
+test "serialize object lists with list markers" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try parseJson(a,
+        \\{"servers":[{"name":"web1","port":"80"},{"name":"web2","port":"81"}]}
+    );
+    var config = Config{};
+    config.list_markers = "-";
+
+    const serialized = try serialize(a, val, config);
+    try std.testing.expect(std.mem.indexOf(u8, serialized,
+        \\servers =
+        \\  -
+        \\    name = web1
+        \\    port = 80
+        \\  -
+        \\    name = web2
+        \\    port = 81
+    ) != null);
+    const roundtrip = try loadsWithConfig(a, serialized, config);
+    try std.testing.expect(roundtrip.eql(val));
+}
+
+test "serialize null as literal" {
+    const alloc = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const val = try parseJson(a,
+        \\{"nothing":null}
+    );
+    const serialized = try serialize(a, val, null);
+    try std.testing.expect(std.mem.indexOf(u8, serialized, "nothing = null\n") != null);
+    const roundtrip = try loads(a, serialized);
+    const expected = try parseJson(a,
+        \\{"nothing":"null"}
+    );
+    try std.testing.expect(roundtrip.eql(expected));
 }
 
 test "mixed indentation rejected" {

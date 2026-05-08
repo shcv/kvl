@@ -551,6 +551,128 @@ func TestSerializeNested(t *testing.T) {
 	}
 }
 
+func TestLoadsNestedListsWithBareMarkers(t *testing.T) {
+	input := "#= kvl 1.0 -\ngroups =\n    -\n        - a\n        - b\n    -\n        - c\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	expected := map[string]any{
+		"groups": []any{
+			[]any{"a", "b"},
+			[]any{"c"},
+		},
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestLoadsNestedListsWithInlineSugar(t *testing.T) {
+	input := "#= kvl 1.0 -\ngroups =\n    - - a\n      - b\n    - - c\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	expected := map[string]any{
+		"groups": []any{
+			[]any{"a", "b"},
+			[]any{"c"},
+		},
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestLoadsObjectListsWithInlineSugar(t *testing.T) {
+	input := "#= kvl 1.0 -\nservers =\n    - name = web1\n      port = 80\n    - name = web2\n      port = 81\n"
+	result, err := Loads(input)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	expected := map[string]any{
+		"servers": []any{
+			map[string]any{"name": "web1", "port": "80"},
+			map[string]any{"name": "web2", "port": "81"},
+		},
+	}
+	if !jsonEqual(result, expected) {
+		t.Errorf("mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
+func TestSerializeNestedListsWithListMarkers(t *testing.T) {
+	data := map[string]any{
+		"groups": []any{
+			[]any{"a", "b"},
+			[]any{"c"},
+		},
+	}
+	cfg := DefaultConfig()
+	cfg.ListMarkers = "-"
+	s, err := MarshalStringWithConfig(data, cfg, true)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	expectedSnippet := "groups =\n    -\n        - a\n        - b\n    -\n        - c\n"
+	if !strings.Contains(s, expectedSnippet) {
+		t.Fatalf("serialized output missing nested-list form:\n%s", s)
+	}
+	result, err := Loads(s)
+	if err != nil {
+		t.Fatalf("re-parse error: %v", err)
+	}
+	if !jsonEqual(result, data) {
+		t.Errorf("round-trip mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(data))
+	}
+}
+
+func TestSerializeObjectListsWithListMarkers(t *testing.T) {
+	data := map[string]any{
+		"servers": []any{
+			map[string]any{"name": "web1", "port": "80"},
+			map[string]any{"name": "web2", "port": "81"},
+		},
+	}
+	cfg := DefaultConfig()
+	cfg.ListMarkers = "-"
+	s, err := MarshalStringWithConfig(data, cfg, true)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	expectedSnippet := "servers =\n    -\n        name = web1\n        port = 80\n    -\n        name = web2\n        port = 81\n"
+	if !strings.Contains(s, expectedSnippet) {
+		t.Fatalf("serialized output missing object-list form:\n%s", s)
+	}
+	result, err := Loads(s)
+	if err != nil {
+		t.Fatalf("re-parse error: %v", err)
+	}
+	if !jsonEqual(result, data) {
+		t.Errorf("round-trip mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(data))
+	}
+}
+
+func TestSerializeNullAsLiteral(t *testing.T) {
+	data := map[string]any{"nothing": nil}
+	s, err := MarshalString(data)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	if !strings.Contains(s, "nothing = null\n") {
+		t.Fatalf("expected null literal, got:\n%s", s)
+	}
+	result, err := Loads(s)
+	if err != nil {
+		t.Fatalf("re-parse error: %v", err)
+	}
+	expected := map[string]any{"nothing": "null"}
+	if !jsonEqual(result, expected) {
+		t.Errorf("round-trip mismatch\ngot:  %v\nwant: %v", toJSON(result), toJSON(expected))
+	}
+}
+
 // --- Custom separator ---
 
 func TestCustomSeparator(t *testing.T) {

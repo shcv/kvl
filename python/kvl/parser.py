@@ -223,6 +223,75 @@ def _collect_multiline_value(
     return ("\n" + "\n".join(value_lines) if value_lines else "", i)
 
 
+def _line_indent(line: str) -> int:
+    """Return the leading indentation width of a line."""
+    return len(line) - len(line.lstrip())
+
+
+def _capture_indented_block(
+    lines: List[str], start_idx: int, parent_indent: int
+) -> Tuple[str, int]:
+    """Capture a deeper-indented child block if one exists."""
+    if start_idx >= len(lines):
+        return "", start_idx
+
+    probe_idx = start_idx
+    while probe_idx < len(lines) and not lines[probe_idx].strip():
+        probe_idx += 1
+
+    if probe_idx >= len(lines) or _line_indent(lines[probe_idx]) <= parent_indent:
+        return "", start_idx
+
+    return _collect_multiline_value(lines, start_idx, parent_indent)
+
+
+def _classify_multiline_block(value: str, config: KvlConfig) -> str:
+    """Classify a captured multiline block as nested KVL, plain text, or mixed."""
+    if '\n' not in value:
+        return "scalar"
+
+    lines = value.split("\n")
+    non_blank_lines = [line for line in lines if line.strip()]
+    if not non_blank_lines:
+        return "text"
+
+    min_indent = min(_line_indent(line) for line in non_blank_lines)
+    base_lines = [line for line in non_blank_lines if _line_indent(line) == min_indent]
+
+    lines_with_sep = 0
+    for line in base_lines:
+        content = line.lstrip()
+        has_sep = _find_unescaped_separator(content, config.separator) != -1
+        has_marker = bool(config.list_markers and _is_list_marker(content, 0, config))
+        if has_sep or has_marker:
+            lines_with_sep += 1
+
+    if lines_with_sep == len(base_lines):
+        return "nested"
+    if lines_with_sep == 0:
+        return "text"
+    return "mixed"
+
+
+def _desugar_list_item_block(item_content: str, child_block: str) -> str:
+    """Treat inline list-item content with children as the bare-marker form."""
+    block_lines = child_block.split("\n")
+    child_prefix = ""
+    for line in block_lines:
+        if line.strip():
+            child_prefix = line[:_line_indent(line)]
+            break
+    return "\n" + child_prefix + item_content + child_block
+
+
+def _should_desugar_list_item_block(item_content: str, separator: str) -> bool:
+    """Only desugar inline list items that already carry a real inline payload."""
+    sep_pos = _find_unescaped_separator(item_content, separator)
+    if sep_pos == -1:
+        return True
+    return bool(item_content[sep_pos + len(separator):].strip())
+
+
 def _parse_kvs(
     text: str, config: KvlConfig, allow_anonymous_lists: bool = False, depth: int = 0
 ) -> List[Dict[str, str]]:
@@ -259,11 +328,29 @@ def _parse_kvs(
             # This is a list item
             # Remove the marker and following whitespace from that position
             list_item_content = line[first_char_pos + 1 :].lstrip()
+            parent_indent = _line_indent(line)
+            child_block, new_i = _capture_indented_block(lines, i + 1, parent_indent)
+            if child_block:
+                if not list_item_content:
+                    list_item_content = child_block
+                    i = new_i - 1
+                elif _should_desugar_list_item_block(
+                    list_item_content, config.separator
+                ):
+                    list_item_content = _desugar_list_item_block(
+                        list_item_content, child_block
+                    )
+                    i = new_i - 1
+                elif current_list_key:
+                    list_item_content = list_item_content + child_block
+                    i = new_i - 1
 
             # Check if this list item contains a separator (is a key-value pair)
-            item_sep_pos = _find_unescaped_separator(
-                list_item_content, config.separator
-            )
+            item_sep_pos = -1
+            if not list_item_content.startswith("\n"):
+                item_sep_pos = _find_unescaped_separator(
+                    list_item_content, config.separator
+                )
 
             if current_list_key:
                 # Continue the current list
@@ -277,15 +364,14 @@ def _parse_kvs(
                     ].strip()
 
                     # Handle multi-line values for list item
-                    if not item_value and i + 1 < len(lines):
-                        next_line = lines[i + 1] if i + 1 < len(lines) else ""
-                        if next_line and (
-                            next_line.startswith(" ") or next_line.startswith("\t")
-                        ):
-                            parent_indent = len(line) - len(line.lstrip())
-                            item_value, new_i = _collect_multiline_value(
-                                lines, i + 1, parent_indent
-                            )
+                    if not item_value and child_block:
+                        item_value = child_block
+                        i = new_i - 1  # Adjust since main loop will increment
+                    elif not item_value:
+                        item_value, new_i = _capture_indented_block(
+                            lines, i + 1, parent_indent
+                        )
+                        if item_value:
                             i = new_i - 1  # Adjust since main loop will increment
 
                     # Add as anonymous key-value pair
@@ -303,7 +389,7 @@ def _parse_kvs(
             continue
 
         # Check for indented line without separator (multiline continuation)
-        line_indent = len(line) - len(line.lstrip())
+        line_indent = _line_indent(line)
         sep_pos = _find_unescaped_separator(line, config.separator)
 
         if sep_pos == -1 and line_indent > 0 and result:
@@ -335,31 +421,25 @@ def _parse_kvs(
             current_list_key = None
 
         # Handle multi-line values
-        if not value_part and i + 1 < len(lines):
-            next_line = lines[i + 1] if i + 1 < len(lines) else ""
-            if next_line and (next_line.startswith(" ") or next_line.startswith("\t")):
-                parent_indent = len(line) - len(line.lstrip())
-                value_part, new_i = _collect_multiline_value(
-                    lines, i + 1, parent_indent
-                )
+        parent_indent = _line_indent(line)
+        if not value_part:
+            value_part, new_i = _capture_indented_block(
+                lines, i + 1, parent_indent
+            )
+            if value_part:
                 i = new_i - 1  # Adjust since main loop will increment
-        elif value_part and i + 1 < len(lines):
+        else:
             # Valued key with indented children → continuation text (W001)
-            next_line = lines[i + 1] if i + 1 < len(lines) else ""
-            if next_line and (next_line.startswith(" ") or next_line.startswith("\t")):
-                next_indent = len(next_line) - len(next_line.lstrip())
-                parent_indent = len(line) - len(line.lstrip())
-                if next_indent > parent_indent:
-                    cont_value, new_i = _collect_multiline_value(
-                        lines, i + 1, parent_indent
-                    )
-                    if cont_value:
-                        _emit_diagnostic(config, "W001",
-                            "Valued key with continuation: indented lines after "
-                            "a valued key are treated as continuation text",
-                            line=i + 1)
-                        value_part = value_part + cont_value
-                        i = new_i - 1
+            cont_value, new_i = _capture_indented_block(
+                lines, i + 1, parent_indent
+            )
+            if cont_value:
+                _emit_diagnostic(config, "W001",
+                    "Valued key with continuation: indented lines after "
+                    "a valued key are treated as continuation text",
+                    line=i + 1)
+                value_part = value_part + cont_value
+                i = new_i - 1
 
         result.append({key: value_part})
         i += 1
@@ -379,10 +459,10 @@ def _is_list_marker(line: str, pos: int, config: KvlConfig) -> bool:
     """Check if position contains a valid list marker."""
     if not config.list_markers or pos >= len(line):
         return False
+    suffix = line[pos + 1:]
     return (
         line[pos] in config.list_markers
-        and pos + 1 < len(line)
-        and line[pos + 1] in " \t"
+        and (not suffix or suffix[0] in " \t")
     )
 
 
@@ -415,39 +495,18 @@ def _process_value(value: str, config: KvlConfig, depth: int = 0) -> Dict[str, A
     # Only re-parse as nested KVL if the value is multiline (from indented
     # blocks).  Single-line values are always literal leaves — they must NOT
     # be re-split on the separator.
-    if '\n' not in value:
+    block_kind = _classify_multiline_block(value, config)
+
+    if block_kind == "scalar":
         return {value: {}}
 
-    # Find base level = minimum indent among non-blank lines
-    lines = value.split("\n")
-    non_blank_lines = [l for l in lines if l.strip()]
-    if not non_blank_lines:
-        return {value: {}}
-
-    min_indent = min(len(l) - len(l.lstrip()) for l in non_blank_lines)
-
-    # Collect base-level lines (at minimum indent)
-    base_lines = [l for l in non_blank_lines if len(l) - len(l.lstrip()) == min_indent]
-
-    # Check how many base-level lines have separators or list markers
-    lines_with_sep = 0
-    for line in base_lines:
-        content = line.lstrip()
-        has_sep = _find_unescaped_separator(content, config.separator) != -1
-        has_marker = config.list_markers and _is_list_marker(content, 0, config)
-        if has_sep or has_marker:
-            lines_with_sep += 1
-
-    if lines_with_sep == len(base_lines):
-        # ALL base-level lines have separators → nested KVL
+    if block_kind == "nested":
         nested_kvs = _parse_kvs(value, config, allow_anonymous_lists=True, depth=depth + 1)
         return _build_model(nested_kvs, config, depth + 1)
 
-    if lines_with_sep == 0:
-        # NONE have separators → plain text (no warning)
+    if block_kind == "text":
         return {value: {}}
 
-    # SOME have separators → plain text + W002 warning
     _emit_diagnostic(config, "W002",
         "Mixed continuation content: some base-level lines have separators "
         "but not all; block treated as plain text")

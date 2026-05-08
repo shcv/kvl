@@ -414,6 +414,86 @@ class TestListMarkerParsing:
         }
         assert result == expected
 
+    def test_yaml_style_nested_scalar_lists(self):
+        """Test bare list markers with indented child lists."""
+        content = """#= kvl 1.0 -
+        groups =
+          -
+            - a
+            - b
+          -
+            - c
+        """
+        result = kvl.loads(content)
+        assert result == {"groups": [["a", "b"], ["c"]]}
+
+    def test_inline_nested_scalar_list_sugar_matches_bare_form(self):
+        """Inline nested-list sugar should match the bare-marker form."""
+        sugar = """#= kvl 1.0 -
+        groups =
+          - - a
+            - b
+          - - c
+            - d
+        """
+        bare = """#= kvl 1.0 -
+        groups =
+          -
+            - a
+            - b
+          -
+            - c
+            - d
+        """
+        assert kvl.parse(sugar) == kvl.parse(bare)
+        assert kvl.loads(sugar) == {"groups": [["a", "b"], ["c", "d"]]}
+
+    def test_yaml_style_list_of_objects(self):
+        """Test bare list markers with indented child objects."""
+        content = """#= kvl 1.0 -
+        servers =
+          -
+            name = web1
+            port = 80
+          -
+            name = web2
+            port = 81
+        """
+        result = kvl.loads(content)
+        expected = {
+            "servers": [
+                {"name": "web1", "port": "80"},
+                {"name": "web2", "port": "81"},
+            ]
+        }
+        assert result == expected
+
+    def test_inline_list_object_sugar_matches_bare_form(self):
+        """Inline object-list sugar should match the bare-marker form."""
+        sugar = """#= kvl 1.0 -
+        servers =
+          - name = web1
+            port = 80
+          - name = web2
+            port = 81
+        """
+        bare = """#= kvl 1.0 -
+        servers =
+          -
+            name = web1
+            port = 80
+          -
+            name = web2
+            port = 81
+        """
+        assert kvl.parse(sugar) == kvl.parse(bare)
+        assert kvl.loads(sugar) == {
+            "servers": [
+                {"name": "web1", "port": "80"},
+                {"name": "web2", "port": "81"},
+            ]
+        }
+
     def test_mixed_list_and_key_value(self):
         """Test that mixing list items with key-value pairs in same context is limited."""
         content = """#= kvl 1.0 -

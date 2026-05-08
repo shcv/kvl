@@ -9,7 +9,10 @@
 //   - Loads: High-level compacted representation (lists preserved in insertion order)
 package kvl
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Config holds parser configuration extracted from a KVL header.
 type Config struct {
@@ -132,5 +135,34 @@ func Marshal(data map[string]any) ([]byte, error) {
 
 // MarshalString serializes a map[string]any to a KVL string.
 func MarshalString(data map[string]any) (string, error) {
-	return serialize(data, "="), nil
+	return MarshalStringWithConfig(data, DefaultConfig(), false)
+}
+
+// MarshalStringWithConfig serializes a map[string]any using the provided config.
+// When includeHeader is true, it prepends a matching KVL header.
+func MarshalStringWithConfig(data map[string]any, cfg Config, includeHeader bool) (string, error) {
+	body, err := serialize(data, cfg)
+	if err != nil {
+		return "", err
+	}
+	if !includeHeader {
+		return body, nil
+	}
+	return generateHeader(cfg) + "\n" + body, nil
+}
+
+func generateHeader(cfg Config) string {
+	parts := []string{"#" + cfg.Separator, "kvl"}
+	version := cfg.Version
+	if version == "" {
+		version = "1.0"
+	}
+	parts = append(parts, version)
+	if cfg.ListMarkers != "" {
+		parts = append(parts, cfg.ListMarkers)
+	}
+	if cfg.Strict {
+		parts = append(parts, "strict")
+	}
+	return strings.Join(parts, " ")
 }

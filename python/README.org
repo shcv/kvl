@@ -12,7 +12,7 @@ For the complete language specification, see the [[https://github.com/shcv/kvl/t
 - *Simple*: Minimal syntax with just key-value pairs
 - *Composable*: Mathematically sound configuration merging
 - *Flexible*: Configurable separators (=, :, ->) with auto-detection
-- *Pythonic*: Optional type inference and list/dict transformations
+- *Pythonic*: Schema-driven validation and list/dict transformations
 - *Validated*: Schema system with type checking and constraints
 - *Complete*: CLI tools for validation, formatting, and conversion
 
@@ -48,8 +48,60 @@ print(config["server"]["host"])  # "localhost"
 print(config["server"]["port"])  # "8080" (string by default)
 
 # Save and load files
-kvl.dump(config, "config.kvl")
+kvl.dump(config, "config.kvl", public_format=True)
 config = kvl.load("config.kvl")
+#+END_SRC
+
+The public serializer keeps ordinary scalars readable, writes =None= as the
+literal text =null=, and uses repeated keys for flat scalar lists:
+
+#+BEGIN_SRC python
+kvl.dumps(
+    {"name": "checkout", "tags": ["web", "api"], "nothing": None},
+    public_format=True,
+)
+#+END_SRC
+
+#+BEGIN_SRC kvl
+name = checkout
+tags = web
+tags = api
+nothing = null
+#+END_SRC
+
+For nested lists or list items that are objects, configure list markers and
+include a header:
+
+#+BEGIN_SRC python
+config = kvl.KvlConfig(list_markers="-")
+kvl.dumps(
+    {
+        "groups": [["a", "b"], ["c"]],
+        "servers": [
+            {"name": "web1", "port": "80"},
+            {"name": "web2", "port": "81"},
+        ],
+    },
+    config=config,
+    include_header=True,
+)
+#+END_SRC
+
+#+BEGIN_SRC kvl
+#= kvl 1.0 -
+groups =
+  -
+    - a
+    - b
+  -
+    - c
+servers =
+  -
+    name = web1
+    port = 80
+  -
+    name = web2
+    port = 81
 #+END_SRC
 
 * Core Concepts
@@ -137,7 +189,7 @@ tags = production
 
 # Use for most application needs
 config = kvl.load("config.kvl")
-kvl.dump(config, "output.kvl")
+kvl.dump(config, "output.kvl", public_format=True)
 #+END_SRC
 
 ** Low-Level API (Categorical)
@@ -193,7 +245,7 @@ kvl format config.kvl --in-place
 
 # Convert between formats
 kvl convert input.json              # JSON to KVL (stdout)
-kvl convert input.yaml -o out.kvl   # YAML to KVL (file)
+kvl convert input.kvl out.json      # KVL to JSON (file)
 
 # Merge configurations
 kvl merge base.kvl dev.kvl local.kvl
@@ -201,9 +253,16 @@ kvl merge base.kvl dev.kvl local.kvl
 # Set separator style
 kvl format config.kvl -s ":"
 
+# Validate and type-convert through a schema
+kvl schema-convert config.kvl config.schema.kvl --json
+
 # Run as Python module
 python -m kvl validate config.kvl
 #+END_SRC
+
+The CLI currently uses the default serializer surface. If you need
+=public_format=True= or explicit list-marker control when writing KVL, use the
+library API.
 
 * Philosophy
 

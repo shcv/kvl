@@ -15,12 +15,13 @@ import { expand } from './transform.js';
  * @param {object} [options]
  * @param {boolean} [options.includeHeader=false]
  * @param {string|null} [options.listMarker]  Explicit marker or null for auto-detect
+ * @param {boolean} [options.publicFormat=false]
  * @param {string} [options.indent='  ']
  * @returns {string}
  */
 export function dumps(data, config, options = {}) {
   config = config ?? new KvlConfig();
-  const { includeHeader = false, listMarker, indent = '  ' } = options;
+  const { includeHeader = false, listMarker, publicFormat = false, indent = '  ' } = options;
 
   if (!data || Object.keys(data).length === 0) {
     return includeHeader ? generateHeader(config) + '\n' : '';
@@ -29,13 +30,13 @@ export function dumps(data, config, options = {}) {
   const effectiveMarker = _determineListMarker(listMarker, config);
 
   let serializeData;
-  if (effectiveMarker) {
+  if (effectiveMarker || publicFormat) {
     serializeData = data;
   } else {
     serializeData = expand(data);
   }
 
-  const serializer = new KvlSerializer(serializeData, config, indent, effectiveMarker);
+  const serializer = new KvlSerializer(serializeData, config, indent, effectiveMarker, publicFormat);
   let result = serializer.serialize();
 
   if (includeHeader) {
@@ -56,6 +57,10 @@ export function dumps(data, config, options = {}) {
 export function dump(data, filePath, config, options = {}) {
   const serialized = dumps(data, config, options);
   writeFileSync(filePath, serialized, 'utf-8');
+}
+
+function isScalar(value) {
+  return value == null || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
 
 // ---------------------------------------------------------------------------
@@ -81,12 +86,14 @@ class KvlSerializer {
    * @param {KvlConfig} config
    * @param {string} indent
    * @param {string|null} listMarker
+   * @param {boolean} publicFormat
    */
-  constructor(data, config, indent = '  ', listMarker = null) {
+  constructor(data, config, indent = '  ', listMarker = null, publicFormat = false) {
     this.data = data;
     this.config = config;
     this.indent = indent;
     this.listMarker = listMarker;
+    this.publicFormat = publicFormat;
     /** @type {string[]} */
     this.lines = [];
   }
@@ -136,8 +143,8 @@ class KvlSerializer {
         this._serializeDictValue(key, value, indentStr, level);
       } else if (Array.isArray(value)) {
         this._serializeListValue(key, value, indentStr, level);
-      } else if (typeof value === 'string') {
-        this._serializeStringValue(key, value, indentStr, level);
+      } else if (isScalar(value)) {
+        this._serializeScalarValue(key, value, indentStr, level);
       } else {
         throw new KvlSerializeError(`Unsupported value type: ${typeof value}`);
       }
@@ -155,6 +162,17 @@ class KvlSerializer {
 
   _serializeListValue(key, value, indentStr, level) {
     if (!this.listMarker) {
+      if (this.publicFormat) {
+        for (const item of value) {
+          if (Array.isArray(item) || (item !== null && typeof item === 'object')) {
+            throw new KvlSerializeError(
+              'Complex list items require a configured list marker in publicFormat mode.'
+            );
+          }
+          this._serializeScalarValue(key, item, indentStr, level);
+        }
+        return;
+      }
       throw new KvlSerializeError(
         'List values are not supported without list markers. Use expand() to convert to categorical format.'
       );
@@ -163,6 +181,11 @@ class KvlSerializer {
     const escapedKey = this._escapeText(key);
     this.lines.push(`${indentStr}${escapedKey}${sep}`);
     this._serializeList(value, level + 1);
+  }
+
+  _serializeScalarValue(key, value, indentStr, level = 0) {
+    const text = value == null ? 'null' : String(value);
+    this._serializeStringValue(key, text, indentStr, level);
   }
 
   _serializeStringValue(key, value, indentStr, level = 0) {
@@ -243,8 +266,16 @@ class KvlSerializer {
     for (const item of items) {
       if (typeof item === 'string') {
         this.lines.push(`${indentStr}${markerStr}${this._escapeText(item)}`);
+      } else if (Array.isArray(item)) {
+        this.lines.push(`${indentStr}${this.listMarker}`);
+        this._serializeList(item, level + 1);
       } else if (item !== null && typeof item === 'object' && !Array.isArray(item)) {
         const entries = Object.entries(item);
+        if (entries.length !== 1) {
+          this.lines.push(`${indentStr}${this.listMarker}`);
+          this._serializeDict(item, level + 1);
+          continue;
+        }
         if (entries.length === 1) {
           const [k, v] = entries[0];
           if (typeof v === 'string' && !v.includes('\n')) {

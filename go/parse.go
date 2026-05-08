@@ -110,13 +110,8 @@ func classifyBlock(lines []string, startLine, parentIndent int, cfg *Config, mod
 		content := strings.TrimLeft(line, " \t")
 		hasSep := false
 		// Check for list markers
-		if cfg.ListMarkers != "" && len(content) >= 2 {
-			for _, marker := range cfg.ListMarkers {
-				if rune(content[0]) == marker && (content[1] == ' ' || content[1] == '\t') {
-					hasSep = true
-					break
-				}
-			}
+		if isListMarkerLine(content, cfg.ListMarkers) {
+			hasSep = true
 		}
 		if !hasSep && findUnescapedSep(content, cfg.Separator) >= 0 {
 			hasSep = true
@@ -130,6 +125,86 @@ func classifyBlock(lines []string, startLine, parentIndent int, cfg *Config, mod
 		return false, false
 	}
 	return sepCount == totalBase, sepCount > 0
+}
+
+func isListMarkerLine(content, markers string) bool {
+	if markers == "" || content == "" {
+		return false
+	}
+	for _, marker := range markers {
+		if rune(content[0]) != marker {
+			continue
+		}
+		if len(content) == 1 {
+			return true
+		}
+		return content[1] == ' ' || content[1] == '\t'
+	}
+	return false
+}
+
+func parseListItemLine(content, markers string) (string, bool) {
+	if !isListMarkerLine(content, markers) {
+		return "", false
+	}
+	if len(content) == 1 {
+		return "", true
+	}
+	return strings.TrimLeft(content[2:], " \t"), true
+}
+
+func captureIndentedBlock(lines []string, startLine, parentIndent int, mode *indentMode) ([]string, int) {
+	var parts []string
+	i := startLine
+
+	for i < len(lines) {
+		line := lines[i]
+		if isBlank(line) {
+			j := i + 1
+			for j < len(lines) && isBlank(lines[j]) {
+				j++
+			}
+			if j < len(lines) {
+				nextIndent, err := measureIndentNoEnforce(lines[j])
+				if err == nil && nextIndent > parentIndent {
+					for k := i; k < j; k++ {
+						parts = append(parts, lines[k])
+					}
+					i = j
+					continue
+				}
+			}
+			break
+		}
+		indent, err := measureIndentNoEnforce(line)
+		if err != nil || indent <= parentIndent {
+			break
+		}
+		parts = append(parts, line)
+		i++
+	}
+
+	return parts, i
+}
+
+func minBlockIndent(lines []string, parentIndent int) int {
+	minIndent := math.MaxInt
+	for _, line := range lines {
+		if isBlank(line) {
+			continue
+		}
+		indent, err := measureIndentNoEnforce(line)
+		if err != nil || indent <= parentIndent {
+			continue
+		}
+		if indent < minIndent {
+			minIndent = indent
+		}
+	}
+	if minIndent == math.MaxInt {
+		return parentIndent + 1
+	}
+	return minIndent
 }
 
 // collectMultilineBlock collects all indented lines after a key with empty
@@ -220,6 +295,36 @@ func buildTree(parent *node, lines []string, startLine, parentIndent int, cfg *C
 		}
 
 		content := strings.TrimLeft(line, " \t")
+
+		if itemContent, ok := parseListItemLine(content, cfg.ListMarkers); ok {
+			childLines, nextLine := captureIndentedBlock(lines, i+1, blockIndent, mode)
+			if itemContent != "" && len(childLines) == 0 && !strings.Contains(itemContent, "\n") && findUnescapedSep(itemContent, cfg.Separator) < 0 && !isListMarkerLine(itemContent, cfg.ListMarkers) {
+				parent.addListEntry(itemContent, newNode())
+				i++
+				continue
+			}
+
+			child := newNode()
+			parseLines := childLines
+			if itemContent != "" {
+				synthIndent := minBlockIndent(childLines, blockIndent)
+				synthetic := strings.Repeat(" ", synthIndent) + itemContent
+				parseLines = append([]string{synthetic}, childLines...)
+			}
+			if len(parseLines) == 0 {
+				parent.addListEntry("", child)
+				i++
+				continue
+			}
+
+			if _, _, err := buildTree(child, parseLines, 0, blockIndent, cfg, mode, depth+1); err != nil {
+				return 0, *mode, err
+			}
+			parent.addListEntry("", child)
+			i = nextLine
+			continue
+		}
+
 		key, value, err := parseLine(content, *cfg, i+1)
 		if err != nil {
 			return 0, *mode, err
@@ -424,13 +529,8 @@ func isBlank(line string) bool {
 // Returns an error if the line has no unescaped separator (bare keys are invalid).
 func parseLine(content string, cfg Config, lineNum int) (string, string, error) {
 	// Check for list markers
-	if cfg.ListMarkers != "" && len(content) >= 2 {
-		for _, marker := range cfg.ListMarkers {
-			if rune(content[0]) == marker && (content[1] == ' ' || content[1] == '\t') {
-				// List marker: empty key, rest is value
-				return "", strings.TrimLeft(content[2:], " \t"), nil
-			}
-		}
+	if item, ok := parseListItemLine(content, cfg.ListMarkers); ok {
+		return "", item, nil
 	}
 
 	// Find the unescaped separator

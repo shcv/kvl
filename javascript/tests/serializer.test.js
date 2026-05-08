@@ -80,6 +80,29 @@ describe('Formatting options', () => {
     expect(arrowResult).toContain('#-> kvl 1.0');
     expect(loads(arrowResult)).toEqual(data);
   });
+
+  it('supports additive publicFormat scalar serialization', () => {
+    const data = { name: 'test', port: 8080, enabled: true };
+    const result = dumps(data, undefined, { publicFormat: true });
+    expect(result).toContain('name = test');
+    expect(result).toContain('port = 8080');
+    expect(result).toContain('enabled = true');
+    expect(result).not.toContain('test =');
+    expect(loads(result)).toEqual({ name: 'test', port: '8080', enabled: 'true' });
+  });
+
+  it('uses repeated keys for string lists in publicFormat mode', () => {
+    const data = { tags: ['web', 'api', 'public'] };
+    const result = dumps(data, undefined, { publicFormat: true });
+    expect(result.match(/tags = /g)).toHaveLength(3);
+    expect(result).not.toContain('web =');
+    expect(loads(result)).toEqual(data);
+  });
+
+  it('requires list markers for complex lists in publicFormat mode', () => {
+    const data = { servers: [{ name: 'web1' }, { name: 'web2' }] };
+    expect(() => dumps(data, undefined, { publicFormat: true })).toThrow(/list marker/i);
+  });
 });
 
 describe('List marker serialization', () => {
@@ -134,8 +157,29 @@ describe('List marker serialization', () => {
     };
     const config = new KvlConfig({ listMarkers: '-' });
     const result = dumps(data, config);
-    expect(result).toContain('- name = web1');
-    expect(result).toContain('- name = web2');
+    expect(result).toContain('\n  -\n    name = web1\n');
+    expect(result).toContain('\n  -\n    name = web2\n');
+  });
+
+  it('roundtrips nested lists with list markers', () => {
+    const data = { groups: [['a', 'b'], ['c']] };
+    const config = new KvlConfig({ listMarkers: '-' });
+    const serialized = dumps(data, config, { includeHeader: true });
+    expect(serialized).toContain('\n  -\n    - a\n    - b\n');
+    expect(loads(serialized)).toEqual(data);
+  });
+
+  it('roundtrips multi-field object lists with list markers', () => {
+    const data = {
+      servers: [
+        { name: 'web1', port: '80' },
+        { name: 'web2', port: '8080' },
+      ],
+    };
+    const config = new KvlConfig({ listMarkers: '-' });
+    const serialized = dumps(data, config, { includeHeader: true });
+    expect(serialized).toContain('\n  -\n    name = web1\n    port = 80\n');
+    expect(loads(serialized)).toEqual(data);
   });
 
   it('handles mixed data types with list markers', () => {
