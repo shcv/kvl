@@ -1,6 +1,7 @@
 # KVL Tree-sitter Grammar
 
-This package provides the Tree-sitter grammar and editor queries for KVL.
+This package publishes the Tree-sitter grammar sources, generated parser, and
+editor queries for KVL.
 
 ## Install
 
@@ -9,8 +10,9 @@ cd tree-sitter-kvl
 npm install
 ```
 
-The package ships the generated parser, the grammar source, and the highlight
-and indent queries used by Tree-sitter-based editors.
+The package ships the generated parser sources, the grammar source, and the
+highlight and indent queries used by Tree-sitter-based editors. It does not
+currently ship a generated Node binding entrypoint.
 
 ## Validate
 

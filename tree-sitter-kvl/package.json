@@ -2,7 +2,6 @@
   "name": "tree-sitter-kvl",
   "version": "0.1.0",
   "description": "Tree-sitter grammar for KVL (Key-Value Language)",
-  "main": "bindings/node",
   "repository": {
     "type": "git",
     "url": "https://github.com/shcv/kvl"
@@ -16,6 +15,7 @@
   "license": "CC0-1.0",
   "type": "commonjs",
   "files": [
+    "LICENSE",
     "README.md",
     "grammar.js",
     "queries",

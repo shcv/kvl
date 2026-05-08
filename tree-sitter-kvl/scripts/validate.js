@@ -27,6 +27,7 @@ for (const grammar of treeSitterConfig.grammars || []) {
 }
 
 for (const relativePath of [
+  'LICENSE',
   'src/grammar.json',
   'src/node-types.json',
   'src/parser.c',
@@ -35,6 +36,10 @@ for (const relativePath of [
   'queries/indents.scm'
 ]) {
   assertExists(relativePath);
+}
+
+if (pkg.main) {
+  assertExists(pkg.main);
 }
 
 if (!pkg.scripts || typeof pkg.scripts.validate !== 'string') {

@@ -25,6 +25,8 @@ npx @vscode/vsce package
 
 The package manifest contributes the `kvl` language, the TextMate grammar in
 `syntaxes/kvl.tmLanguage.json`, the language configuration, and the snippet set.
+The package also includes its own `LICENSE` file so the VSIX carries the stated
+CC0-1.0 license metadata cleanly.
 
 ## Use
 

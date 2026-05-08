@@ -17,5 +17,12 @@
     "links": {
       "repository": "https://github.com/shcv/kvl"
     }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "node": false,
+    "python": false,
+    "rust": false
   }
 }
