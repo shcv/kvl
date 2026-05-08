@@ -1,8 +1,8 @@
-"""Tests for select() filter in KVQ hybrid query engine."""
+"""Tests for select() filter in KVQ query engine."""
 
 import pytest
 import kvl
-from kvl.query_hybrid import (
+from kvl.query import (
     execute, parse_query,
     KvqError, KvqParseError, KvqPathError, KvqTypeError,
 )
@@ -81,6 +81,13 @@ class TestSelectParse:
         assert path_parts == ['config', 'ssl']
         assert op == '=='
         assert value is True
+
+    def test_parse_select_followed_by_path(self):
+        assert parse_query('servers[] | select(.port > 80).name') == [
+            ('get', 'servers'), ('iter',),
+            ('select', (['port'], '>', '80')),
+            ('get', 'name'),
+        ]
 
     def test_parse_select_lte(self):
         ops = parse_query('items[] | select(.score <= 10)')
@@ -191,11 +198,9 @@ class TestSelectExec:
         assert result == {'w': 'banana'}
 
     def test_select_chained_with_get(self):
-        # After select, can continue getting fields
         data = kvl.loads(SERVERS_KVL)
-        result = execute('servers[] | select(.port > 80)', data)
-        # Result is list of dicts; further nav would need another pipe
-        assert all('name' in r for r in result)
+        result = execute('servers[] | select(.port > 80).name', data)
+        assert result == ['web2', 'api1']
 
     def test_select_lt(self):
         data = kvl.loads(SERVERS_KVL)

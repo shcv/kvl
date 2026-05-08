@@ -1,20 +1,20 @@
-"""Tests for the hybrid KVQ query engine (query_hybrid.py).
+"""Tests for the KVQ query engine.
 
 Tests cover:
-- Parse op list (tokenizer-based, D-style)
+- Parse op list
 - Basic path navigation
 - Array operations: index, slice, iterate
 - Pipe functions: length, keys, min, max, sum
 - Edge cases: unicode, hyphenated/escaped keys, multiline values, empty structures
 - Multi-file merge
 - Conformance against fixtures
-- Regressions from C and D bugs
+- Query-engine candidate regressions
 """
 
 import os
 import pytest
 import kvl
-from kvl.query_hybrid import (
+from kvl.query import (
     execute, query, parse_query,
     KvqError, KvqParseError, KvqPathError, KvqTypeError, KvqIndexError,
 )
@@ -320,7 +320,6 @@ class TestEdgeCases:
 
     def test_equals_in_key(self):
         text = open(os.path.join(FIXTURES, 'escape/separator-in-key.kvl')).read()
-        # C accepted this; D failed; hybrid must accept it
         assert q('x=y', text) == 'equation'
         assert q('a=b=c', text) == 'multi'
 
@@ -374,7 +373,6 @@ class TestMultiFileMerge:
 
     def test_scalar_override(self):
         result = query('debug = false\n', 'debug', extra_texts=['debug = true\n'])
-        # Hybrid merge: overlay wins for scalar strings
         assert result == 'true'
 
     def test_unchanged_key(self):

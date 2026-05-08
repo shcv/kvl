@@ -1,8 +1,8 @@
-"""Tests for quoted string literal support in KVQ select() predicates (H2)."""
+"""Tests for quoted string literal support in KVQ select() predicates."""
 
 import pytest
 import kvl
-from kvl.query_hybrid import execute, parse_query, KvqParseError
+from kvl.query import execute, parse_query, KvqParseError
 
 
 def q(query_str, data_dict):

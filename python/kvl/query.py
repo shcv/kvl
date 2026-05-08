@@ -1,10 +1,10 @@
-"""KVQ Hybrid query engine: D's tokenizer + C's execution model.
+"""KVQ query engine for compacted KVL data.
 
 Design:
-  - Parse: D-style regex tokenizer with position info in errors
-  - Compile: flat op list (same as both C and D)
-  - Execute: C-style — compact() data upfront, operate on clean Python types
-  - Public API: D-style query(text, q, extra_texts=[...]) returning List[str]
+  - Parse queries with a tokenizer that reports source positions in errors.
+  - Compile to a flat op list.
+  - Execute against the public KVL data model returned by load()/loads().
+  - Keep raw categorical structures out of the public query API.
 
 Op types:
   ('dot',)         - identity / root (explicit unlike C)
@@ -13,20 +13,7 @@ Op types:
   ('slice', lo, hi)- key/element range (None = open end)
   ('iter',)        - flatmap: fan out each item into its elements
   ('apply', fn)    - terminal aggregator: length|keys|min|max|sum
-
-Key improvements over C:
-  - Tokenizer-based parser: position info in errors, handles hyphenated keys
-  - Identifier regex extended to accept = and \\ in key names
-  - Explicit ('dot',) op in op list
-  - _resolve_slice() for explicit negative-bound normalization
-  - extra_texts parameter for multi-file merge
-
-Key improvements over D:
-  - Correct length: len(str), len(list), len(dict), not count of stream items
-  - Correct keys(): returns list of strings, not newline-joined string
-  - No categorical wrapping in results
-  - = and \\ accepted in key names
-  - Multiline values normalised by compact()
+  ('select', pred) - stream filter with comparison predicate
 """
 
 from __future__ import annotations
@@ -35,7 +22,6 @@ import re
 from typing import Any, Generator, Iterator, List, Optional, Tuple
 
 import kvl
-from kvl.transform import merge as kvl_merge
 
 
 # ---------------------------------------------------------------------------
@@ -66,14 +52,12 @@ class KvqIndexError(KvqError):
 
 
 # ---------------------------------------------------------------------------
-# Tokeniser (D-style, extended identifier charset)
+# Tokeniser
 # ---------------------------------------------------------------------------
 
 # Identifiers: start with non-special char, continue with non-special chars.
 # "Special" chars are: whitespace, . [ ] : | (the grammar punctuation).
 # This means = and \ are valid in identifiers, matching what KVL keys allow.
-_IDENT_RE = re.compile(r'[^\s.\[\]:|]+')
-
 _TOK = re.compile(
     r'(?P<string>"(?:[^"\\]|\\.)*")'   # double-quoted string (must come before ident/cmpop)
     r'|(?P<cmpop>>=|<=|==|!=|>|<)'     # comparison operators (multi-char first, before ident)
@@ -97,13 +81,21 @@ Op = Tuple  # ('dot',) | ('get', key) | ('index', n) | ('slice', lo, hi) | ('ite
 
 _FUNCTIONS = frozenset({'length', 'keys', 'min', 'max', 'sum'})
 
-# select() comparison operators
-_SELECT_OPS = frozenset({'==', '!=', '>', '<', '>=', '<='})
-
 # Predicate: (path_parts, operator, value)
 # path_parts is a list of strings (e.g. ['field'] or ['config', 'ssl'])
 # '.' alone means identity (the item itself)
 Predicate = Tuple  # (path_parts: List[str], op: str, value: Any)
+
+__all__ = [
+    'KvqError',
+    'KvqParseError',
+    'KvqPathError',
+    'KvqTypeError',
+    'KvqIndexError',
+    'execute',
+    'parse_query',
+    'query',
+]
 
 
 def _tokenise(query: str) -> List[Tuple[str, str, int]]:
@@ -158,6 +150,69 @@ def parse_query(query: str) -> List[Op]:
             raise KvqParseError(f"Expected {kind!r}, got {got}", pos)
         return consume()
 
+    def parse_bracket_op(open_tok: Tuple[str, str, int]) -> None:
+        inner = peek()
+        if inner is None:
+            raise KvqParseError("Unclosed '['", open_tok[2])
+        if inner[0] == 'rbr':
+            ops.append(('iter',))
+            consume()
+        elif inner[0] == 'colon':
+            consume()
+            hi_tok = peek()
+            if hi_tok and hi_tok[0] in ('int', 'ident') and _is_integer(hi_tok[1]):
+                hi = int(hi_tok[1])
+                consume()
+            else:
+                hi = None
+            expect('rbr')
+            ops.append(('slice', None, hi))
+        elif inner[0] in ('int', 'ident') and _is_integer(inner[1]):
+            lo = int(inner[1])
+            consume()
+            after = peek()
+            if after and after[0] == 'colon':
+                consume()
+                hi_tok = peek()
+                if hi_tok and hi_tok[0] in ('int', 'ident') and _is_integer(hi_tok[1]):
+                    hi = int(hi_tok[1])
+                    consume()
+                else:
+                    hi = None
+                expect('rbr')
+                ops.append(('slice', lo, hi))
+            else:
+                expect('rbr')
+                ops.append(('index', lo))
+        else:
+            raise KvqParseError(
+                f"Unexpected token inside '[': {inner[1]!r}", inner[2]
+            )
+
+    def parse_path_tail(strict: bool) -> None:
+        """Parse .key and [access] continuations from the current position."""
+        while i < n:
+            tok = peek()
+            if tok[0] == 'pipe':
+                break
+            if tok[0] == 'dot':
+                consume()
+                next_tok = peek()
+                if next_tok is None or next_tok[0] != 'ident':
+                    pos = next_tok[2] if next_tok else len(query)
+                    raise KvqParseError("Expected identifier after '.'", pos)
+                ops.append(('get', next_tok[1]))
+                consume()
+            elif tok[0] == 'lbr':
+                open_tok = consume()
+                parse_bracket_op(open_tok)
+            elif strict:
+                raise KvqParseError(
+                    f"Unexpected token in path: {tok[1]!r}", tok[2]
+                )
+            else:
+                break
+
     # -- Parse path expression --
 
     if not tokens:
@@ -184,67 +239,7 @@ def parse_query(query: str) -> List[Op]:
             first[2]
         )
 
-    # Continue path: .key, [bracket_op]
-    while i < n:
-        tok = peek()
-        if tok[0] == 'pipe':
-            break
-        if tok[0] == 'dot':
-            consume()
-            next_tok = peek()
-            if next_tok is None or next_tok[0] != 'ident':
-                pos = next_tok[2] if next_tok else len(query)
-                raise KvqParseError("Expected identifier after '.'", pos)
-            ops.append(('get', next_tok[1]))
-            consume()
-        elif tok[0] == 'lbr':
-            consume()  # consume '['
-            inner = peek()
-            if inner is None:
-                raise KvqParseError("Unclosed '['", tok[2])
-            if inner[0] == 'rbr':
-                # [] iterator
-                ops.append(('iter',))
-                consume()
-            elif inner[0] == 'colon':
-                # [:hi]
-                consume()
-                hi_tok = peek()
-                if hi_tok and hi_tok[0] == 'int':
-                    hi = int(hi_tok[1])
-                    consume()
-                elif hi_tok and hi_tok[0] == 'ident' and _is_integer(hi_tok[1]):
-                    hi = int(hi_tok[1])
-                    consume()
-                else:
-                    hi = None
-                expect('rbr')
-                ops.append(('slice', None, hi))
-            elif inner[0] in ('int', 'ident') and _is_integer(inner[1]):
-                lo = int(inner[1])
-                consume()
-                after = peek()
-                if after and after[0] == 'colon':
-                    consume()
-                    hi_tok = peek()
-                    if hi_tok and hi_tok[0] in ('int', 'ident') and _is_integer(hi_tok[1]):
-                        hi = int(hi_tok[1])
-                        consume()
-                    else:
-                        hi = None
-                    expect('rbr')
-                    ops.append(('slice', lo, hi))
-                else:
-                    expect('rbr')
-                    ops.append(('index', lo))
-            else:
-                raise KvqParseError(
-                    f"Unexpected token inside '[': {inner[1]!r}", inner[2]
-                )
-        else:
-            raise KvqParseError(
-                f"Unexpected token in path: {tok[1]!r}", tok[2]
-            )
+    parse_path_tail(strict=True)
 
     # -- Parse pipe functions --
     while i < n:
@@ -260,6 +255,7 @@ def parse_query(query: str) -> List[Op]:
             consume()  # consume 'select'
             select_op, i = _parse_select_predicate(tokens, i, n, query)
             ops.append(select_op)
+            parse_path_tail(strict=False)
         elif fn_tok[1] not in _FUNCTIONS:
             raise KvqParseError(
                 f"Unknown function {fn_tok[1]!r} (known: {', '.join(sorted(_FUNCTIONS))})",
@@ -364,7 +360,7 @@ def _parse_select_predicate(
 
 
 # ---------------------------------------------------------------------------
-# Slice helper (D-style explicit normalisation)
+# Slice helper
 # ---------------------------------------------------------------------------
 
 def _resolve_slice(lo: Optional[int], hi: Optional[int], length: int) -> Tuple[int, int]:
@@ -381,7 +377,7 @@ def _resolve_slice(lo: Optional[int], hi: Optional[int], length: int) -> Tuple[i
 
 
 # ---------------------------------------------------------------------------
-# Execution engine (C-style: clean Python types from compact())
+# Execution engine
 # ---------------------------------------------------------------------------
 
 def _coerce_to_list(item: Any, op: str) -> List[Any]:
@@ -420,8 +416,6 @@ def _run_iter(stream: Iterator[Any]) -> Generator:
 def _run_index(idx: int, stream: Iterator[Any]) -> Generator:
     for item in stream:
         lst = _coerce_to_list(item, f'[{idx}]')
-        lo, hi = _resolve_slice(idx, idx + 1 if idx >= 0 else idx + len(lst) + 1, len(lst))
-        # Simpler: use Python indexing directly
         try:
             yield lst[idx]
         except IndexError:
