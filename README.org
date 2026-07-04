@@ -10,8 +10,8 @@ validated before use.
 The everyday interface is intentionally plain:
 
 - =load= and =loads= parse KVL into normal dictionaries or objects.
-- Python, JavaScript, Go, and Zig all expose serializers that can write normal
-  dictionaries or objects back to KVL.
+- Python, JavaScript, Go, Zig, and Rust all expose serializers that can write
+  normal dictionaries or objects back to KVL.
 - Repeated keys become lists in the public API.
 - Schema validation is optional and can convert strings into typed values.
 - The lower-level representation is available for implementers, but most users
@@ -139,10 +139,11 @@ on the list-item line, such as =- - a= or =- name = web1= with additional
 indented child lines. Serializers currently normalize that shorthand back to
 the bare-marker form shown above.
 
-All four current language implementations can round-trip that list-marker
+All five current language implementations can round-trip that list-marker
 surface. Python and JavaScript expose the most ergonomic serializer switches;
 Go and Zig use lower-level config or helper APIs for the same nested-list and
-object-list forms.
+object-list forms. Rust exposes both a dynamic =Value= API and typed
+serialization through serde.
 
 * Configuration Merging
 
@@ -245,6 +246,7 @@ currently exposed most clearly through the library APIs.
 - [[file:javascript/][javascript/]] - JavaScript parser, serializer, merge helpers, and CLI.
 - [[file:go/][go/]] - Go parser, serializer, merge helpers, and CLI.
 - [[file:zig/][zig/]] - Zig parser, serializer, merge helpers, and CLI.
+- [[file:rust/][rust/]] - Rust parser, serializer, merge helpers, serde integration, and CLI.
 
 Shared fixtures live in [[file:fixtures/][fixtures/]], and the cross-language test
 harness lives in [[file:conformance/][conformance/]].
@@ -277,6 +279,7 @@ cd python && python -m pytest tests/
 cd javascript && npm test
 cd go && go test
 cd zig && zig build test
+cd rust && cargo test
 #+end_src
 
 Run shared conformance tests from the repository root:

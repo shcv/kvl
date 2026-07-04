@@ -1,0 +1,21 @@
+[package]
+name = "kvl"
+version = "0.1.0"
+edition = "2021"
+description = "Key-Value Language (KVL): a minimalist configuration format with associative merge semantics"
+license = "CC0-1.0"
+repository = "https://github.com/shcv/kvl"
+keywords = ["configuration", "config", "kvl", "serde", "parser"]
+categories = ["config", "parser-implementations", "encoding"]
+
+[dependencies]
+indexmap = { version = "2", features = ["serde"] }
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[[bin]]
+name = "kvl"
+path = "src/main.rs"

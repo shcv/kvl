@@ -15,6 +15,7 @@ The project is organized as:
 - **go/** - Go implementation
 - **zig/** - Zig implementation
 - **javascript/** - JavaScript implementation
+- **rust/** - Rust implementation (serde integration)
 - **fixtures/** - Canonical test fixtures shared across implementations
 
 ## Development Commands
@@ -53,6 +54,14 @@ npm run test:watch               # Run tests in watch mode
 node src/cli.js parse file.kvl   # Parse a KVL file to JSON
 ```
 
+### Rust Implementation (rust/) - **Working**
+```bash
+cd rust/
+cargo test                                  # Run all tests
+cargo build --release                       # Build library and CLI
+./target/release/kvl parse file.kvl         # Parse a KVL file to JSON
+```
+
 ## Architecture Overview
 
 ### Multi-Language Structure
@@ -60,6 +69,7 @@ node src/cli.js parse file.kvl   # Parse a KVL file to JSON
 - **go/**: Go implementation with Parse/Load API and compact/expand transforms
 - **zig/**: Zig implementation with complete parser, serializer, and merge operations
 - **javascript/**: JavaScript implementation with JSON-like API (`load`, `loads`, `dump`, `dumps`)
+- **rust/**: Rust implementation with dynamic `Value` API (`parse`, `loads`, `dumps`) plus typed serde `from_str`/`to_string`
 
 ### Key Architectural Concepts
 
@@ -125,16 +135,17 @@ Fixtures are in `fixtures/`:
 - `invalid/` - Files that should fail parsing (bad indent, depth limit)
 - `merge/` - Merge operation test cases (including associativity)
 
-All 5 implementations (Python lib, Python CLI, Go, Zig, JavaScript) pass all conformance fixtures (410/410 with round-trip).
+All 6 implementations (Python lib, Python CLI, Go, Zig, JavaScript, Rust) pass all conformance fixtures (498/498 with round-trip).
 
 ## Examples and Testing
 
 Each implementation has its own examples in `<impl>/examples/`.
 
-- Python: 111 passing tests
+- Python: 252 passing tests
 - Go: 57 passing tests (API, compatibility, integration, benchmarks)
 - Zig: 36 passing tests (parser, merge, JSON output, escapes, serialization)
 - JavaScript: 111 passing tests
+- Rust: 69 passing tests (parser, serializer, transforms, serde, doc tests)
 
 ## Memories
 - Instead of writing temporary test scripts, add tests to the test framework

@@ -1,4 +1,4 @@
-.PHONY: ci conformance js-syntax js-test json-check lint python-lint python-test test tree-sitter-test go-test zig-test
+.PHONY: ci conformance js-syntax js-test json-check lint python-lint python-test rust-test test tree-sitter-test go-test zig-test
 
 PYTHON ?= python3
 NODE ?= node
@@ -7,7 +7,7 @@ ci: lint test
 
 lint: python-lint js-syntax json-check
 
-test: python-test js-test go-test zig-test tree-sitter-test conformance
+test: python-test js-test go-test zig-test rust-test tree-sitter-test conformance
 
 python-lint:
 	$(MAKE) -C python lint
@@ -30,6 +30,9 @@ go-test:
 
 zig-test:
 	cd zig && zig build test --global-cache-dir $${ZIG_GLOBAL_CACHE_DIR:-/tmp/kvl-zig-cache}
+
+rust-test:
+	cd rust && cargo test
 
 tree-sitter-test:
 	cd tree-sitter-kvl && XDG_CACHE_HOME=$${XDG_CACHE_HOME:-/tmp/kvl-tree-sitter-cache} npm test

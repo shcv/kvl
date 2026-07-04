@@ -76,6 +76,22 @@ jobs:
       - run: zig build test
         working-directory: zig
 
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: rust
+      - run: cargo test
+        working-directory: rust
+
   tree-sitter:
     name: Tree-sitter tests
     runs-on: ubuntu-latest
@@ -108,4 +124,8 @@ jobs:
       - uses: mlugg/setup-zig@v1
         with:
           version: "0.15.2"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
       - run: python3 conformance/run.py

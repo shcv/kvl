@@ -23,6 +23,7 @@ PYTHON_DIR = PROJECT_ROOT / "python"
 GO_DIR = PROJECT_ROOT / "go"
 ZIG_DIR = PROJECT_ROOT / "zig"
 JS_DIR = PROJECT_ROOT / "javascript"
+RUST_DIR = PROJECT_ROOT / "rust"
 
 
 class Colors:
@@ -73,6 +74,11 @@ IMPLEMENTATIONS = {
         "name": "JavaScript",
         "features": {"parse", "categorical", "merge", "serialize", "header"},
         "description": "JavaScript implementation",
+    },
+    "rust": {
+        "name": "Rust",
+        "features": {"parse", "categorical", "merge", "serialize", "header"},
+        "description": "Rust implementation",
     },
 }
 
@@ -262,6 +268,25 @@ def check_zig_available() -> Tuple[bool, str]:
     return True, ""
 
 
+def check_rust_available() -> Tuple[bool, str]:
+    if not RUST_DIR.exists():
+        return False, "Rust directory not found"
+    rust_binary = RUST_DIR / "target" / "release" / "kvl"
+    if not rust_binary.exists():
+        try:
+            result = subprocess.run(
+                ["cargo", "build", "--release"],
+                capture_output=True, text=True, cwd=str(RUST_DIR), timeout=300,
+            )
+            if result.returncode != 0:
+                return False, f"Rust build failed: {result.stderr}"
+        except FileNotFoundError:
+            return False, "Cargo not installed"
+        except Exception as e:
+            return False, str(e)
+    return True, ""
+
+
 def check_js_available() -> Tuple[bool, str]:
     if not JS_DIR.exists():
         return False, "JavaScript directory not found"
@@ -289,6 +314,8 @@ def is_available(impl_key: str) -> Tuple[bool, str]:
             _availability_cache[impl_key] = check_zig_available()
         elif impl_key == "javascript":
             _availability_cache[impl_key] = check_js_available()
+        elif impl_key == "rust":
+            _availability_cache[impl_key] = check_rust_available()
         else:
             _availability_cache[impl_key] = (False, "Unknown implementation")
     return _availability_cache[impl_key]
@@ -373,6 +400,8 @@ def get_parse_cmd(impl_key: str, kvl_path: Path) -> Tuple[Optional[Any], Optiona
         return _run_cli([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "parse", str(kvl_path)])
     elif impl_key == "javascript":
         return _run_cli(["node", str(JS_DIR / "src" / "cli.js"), "parse", str(kvl_path)])
+    elif impl_key == "rust":
+        return _run_cli([str(RUST_DIR / "target" / "release" / "kvl"), "parse", str(kvl_path)])
     return None, "Unknown implementation"
 
 
@@ -387,6 +416,8 @@ def get_parse_raw_cmd(impl_key: str, kvl_path: Path) -> Tuple[Optional[Any], Opt
         return _run_cli([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "parse-raw", str(kvl_path)])
     elif impl_key == "javascript":
         return _run_cli(["node", str(JS_DIR / "src" / "cli.js"), "parse-raw", str(kvl_path)])
+    elif impl_key == "rust":
+        return _run_cli([str(RUST_DIR / "target" / "release" / "kvl"), "parse-raw", str(kvl_path)])
     return None, "Not supported"
 
 
@@ -401,6 +432,8 @@ def get_merge_cmd(impl_key: str, base_path: Path, overlay_path: Path) -> Tuple[O
         return _run_cli([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "merge", str(base_path), str(overlay_path)])
     elif impl_key == "javascript":
         return _run_cli(["node", str(JS_DIR / "src" / "cli.js"), "merge", str(base_path), str(overlay_path)])
+    elif impl_key == "rust":
+        return _run_cli([str(RUST_DIR / "target" / "release" / "kvl"), "merge", str(base_path), str(overlay_path)])
     return None, "Not supported"
 
 
@@ -416,6 +449,8 @@ def get_serialize_cmd(impl_key: str, data: Any) -> Tuple[Optional[str], Optional
         return _run_cli_raw([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "serialize"], stdin_data=json_str)
     elif impl_key == "javascript":
         return _run_cli_raw(["node", str(JS_DIR / "src" / "cli.js"), "serialize"], stdin_data=json_str)
+    elif impl_key == "rust":
+        return _run_cli_raw([str(RUST_DIR / "target" / "release" / "kvl"), "serialize"], stdin_data=json_str)
     return None, "Not supported"
 
 
@@ -430,6 +465,8 @@ def get_expect_fail_cmd(impl_key: str, kvl_path: Path) -> Tuple[bool, str]:
         return _run_cli_expect_fail([str(ZIG_DIR / "zig-out" / "bin" / "kvl-demo"), "parse", str(kvl_path)])
     elif impl_key == "javascript":
         return _run_cli_expect_fail(["node", str(JS_DIR / "src" / "cli.js"), "parse", str(kvl_path)])
+    elif impl_key == "rust":
+        return _run_cli_expect_fail([str(RUST_DIR / "target" / "release" / "kvl"), "parse", str(kvl_path)])
     return False, "Unknown implementation"
 
 
